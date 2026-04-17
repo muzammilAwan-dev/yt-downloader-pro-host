@@ -136,7 +136,6 @@ namespace YTDLPHost.Services
                 task.Status = DownloadStatus.Downloading;
             }
 
-            // Parse progress line: [download] 12.3% of ~156.78MiB at 5.12MiB/s ETA 00:42
             if (data.Contains("[download]"))
             {
                 var percentMatch = Regex.Match(data, @"\[download\]\s+(?:(\d+\.?\d*)%|100%)");
@@ -173,7 +172,6 @@ namespace YTDLPHost.Services
                 OnProgressUpdate?.Invoke(this, new ProgressEventArgs(task.Id, task.Progress, task.Speed, task.Eta));
             }
 
-            // Parse destination/filename
             if (data.Contains("Destination:", StringComparison.OrdinalIgnoreCase))
             {
                 var destMatch = Regex.Match(data, @"Destination:\s+(.+)");
@@ -187,13 +185,6 @@ namespace YTDLPHost.Services
                 }
             }
 
-            // Parse title from yt-dlp output
-            if (data.StartsWith("[youtube]") && data.Contains("Extracting URL"))
-            {
-                // Title extraction is usually in the info JSON or webpage extraction
-            }
-
-            // Parse [Merger] or [ExtractAudio] for output path
             if ((data.Contains("[Merger]") || data.Contains("[ExtractAudio]") || data.Contains("[MoveFiles]")) 
                 && data.Contains("Destination:"))
             {
@@ -316,7 +307,7 @@ namespace YTDLPHost.Services
         public Guid TaskId { get; }
         public string ErrorMessage { get; }
 
-        public ErrorEventArgs(Guid taskId, string errorMessage)
+        public DownloadErrorEventArgs(Guid taskId, string errorMessage)
         {
             TaskId = taskId;
             ErrorMessage = errorMessage;
