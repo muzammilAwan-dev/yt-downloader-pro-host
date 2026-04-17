@@ -159,7 +159,8 @@ namespace YTDLPHost
 
                 if (proc.ExitCode != 0)
                 {
-                    MessageBox.Show(
+                    // FIXED: Added System.Windows explicitly to resolve the ambiguous reference
+                    System.Windows.MessageBox.Show(
                         "yt-dlp.exe was found but returned an error.\n\n" +
                         "Please ensure yt-dlp is correctly installed.",
                         "YT Downloader Pro - Warning",
