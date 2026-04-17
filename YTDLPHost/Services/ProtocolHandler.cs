@@ -54,7 +54,7 @@ namespace YTDLPHost.Services
             }
             catch (UnauthorizedAccessException)
             {
-                MessageBox.Show(
+                System.Windows.MessageBox.Show(
                     "Failed to register the ytdlp:// protocol. Please run the application as Administrator once to register the protocol handler.",
                     "Protocol Registration Failed",
                     MessageBoxButton.OK,
@@ -62,7 +62,7 @@ namespace YTDLPHost.Services
             }
             catch (Exception ex)
             {
-                MessageBox.Show(
+                System.Windows.MessageBox.Show(
                     $"Failed to register protocol handler: {ex.Message}",
                     "Protocol Registration Error",
                     MessageBoxButton.OK,
