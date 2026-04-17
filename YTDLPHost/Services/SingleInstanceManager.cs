@@ -51,7 +51,7 @@ namespace YTDLPHost.Services
                         PipeName,
                         PipeDirection.In,
                         1,
-                        PipeTransmissionMode.Message,
+                        PipeTransmissionMode.Byte, // FIXED: Changed from Message to Byte
                         PipeOptions.Asynchronous);
 
                     await pipeServer.WaitForConnectionAsync(cancellationToken);
