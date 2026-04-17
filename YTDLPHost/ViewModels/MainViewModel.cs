@@ -105,7 +105,7 @@ namespace YTDLPHost.ViewModels
             catch
             {
                 StatusText = "yt-dlp not found. Please run setup.bat first.";
-                MessageBox.Show(
+                System.Windows.MessageBox.Show(
                     "yt-dlp.exe was not found in your PATH.\n\n" +
                     "Please run setup.bat first to install yt-dlp, ffmpeg, and configure the protocol handler.",
                     "YT Downloader Pro - Component Missing",
@@ -246,7 +246,7 @@ namespace YTDLPHost.ViewModels
             var vm = _downloads.FirstOrDefault(d => d.Id == e.TaskId);
             if (vm != null)
             {
-                Application.Current?.Dispatcher.BeginInvoke(() =>
+                System.Windows.Application.Current?.Dispatcher.BeginInvoke(() =>
                 {
                     vm.Refresh();
                     UpdateActiveCount();
@@ -259,7 +259,7 @@ namespace YTDLPHost.ViewModels
             var vm = _downloads.FirstOrDefault(d => d.Id == e.TaskId);
             if (vm != null)
             {
-                Application.Current?.Dispatcher.BeginInvoke(() =>
+                System.Windows.Application.Current?.Dispatcher.BeginInvoke(() =>
                 {
                     vm.Refresh();
                     HasCompletedDownloads = true;
