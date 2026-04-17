@@ -1,6 +1,6 @@
+using System;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Input;
 using YTDLPHost.ViewModels;
 using YTDLPHost.Services;
 
@@ -47,7 +47,7 @@ namespace YTDLPHost
             registerItem.Click += (s, args) =>
             {
                 ProtocolHandler.Register();
-                MessageBox.Show(this, "Protocol handler registered.", "YT Downloader Pro", MessageBoxButton.OK, MessageBoxImage.Information);
+                System.Windows.MessageBox.Show(this, "Protocol handler registered.", "YT Downloader Pro", MessageBoxButton.OK, MessageBoxImage.Information);
             };
 
             var unregisterItem = new MenuItem
@@ -59,7 +59,7 @@ namespace YTDLPHost
             unregisterItem.Click += (s, args) =>
             {
                 ProtocolHandler.Unregister();
-                MessageBox.Show(this, "Protocol handler unregistered.", "YT Downloader Pro", MessageBoxButton.OK, MessageBoxImage.Information);
+                System.Windows.MessageBox.Show(this, "Protocol handler unregistered.", "YT Downloader Pro", MessageBoxButton.OK, MessageBoxImage.Information);
             };
 
             var exitItem = new MenuItem

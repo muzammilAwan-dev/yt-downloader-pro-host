@@ -17,7 +17,6 @@
         SnapsToDevicePixels="True">
 
     <Window.Resources>
-        <!-- Download Item Card Template -->
         <DataTemplate x:Key="DownloadItemTemplate" DataType="{x:Type vm:DownloadItemViewModel}">
             <Border Background="{StaticResource SurfaceBrush}" 
                     BorderBrush="{StaticResource BorderBrush}" 
@@ -32,7 +31,6 @@
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
-                    <!-- Top Row: Status Icon + Title + Resolution Badge + Actions -->
                     <Grid Grid.Row="0">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto"/>
@@ -41,7 +39,6 @@
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
 
-                        <!-- Status Indicator -->
                         <Border Grid.Column="0" 
                                 Width="10" Height="10" 
                                 CornerRadius="5"
@@ -61,7 +58,6 @@
                             </Border.Triggers>
                         </Border>
 
-                        <!-- Title -->
                         <TextBlock Grid.Column="1" 
                                    Text="{Binding DisplayTitle}" 
                                    FontSize="14"
@@ -70,7 +66,6 @@
                                    TextTrimming="CharacterEllipsis"
                                    VerticalAlignment="Center"/>
 
-                        <!-- Resolution Badge -->
                         <Border Grid.Column="2" 
                                 Background="{StaticResource SurfaceHoverBrush}"
                                 CornerRadius="4"
@@ -83,7 +78,6 @@
                                        Foreground="{StaticResource TextSecondaryBrush}"/>
                         </Border>
 
-                        <!-- Action Buttons -->
                         <StackPanel Grid.Column="3" 
                                     Orientation="Horizontal" 
                                     Visibility="{Binding Task.Status, Converter={StaticResource StatusToActionsVisibilityConverter}}"
@@ -104,7 +98,6 @@
                             </Button>
                         </StackPanel>
 
-                        <!-- Cancel Button (when active) -->
                         <Button Grid.Column="3"
                                 Style="{StaticResource IconButtonStyle}"
                                 Command="{Binding DataContext.CancelDownloadCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
@@ -115,7 +108,6 @@
                                   Fill="{StaticResource ErrorBrush}" Width="16" Height="16" Stretch="Uniform"/>
                         </Button>
 
-                        <!-- Remove Button (when done) -->
                         <Button Grid.Column="3"
                                 Style="{StaticResource IconButtonStyle}"
                                 Command="{Binding DataContext.RemoveDownloadCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
@@ -127,7 +119,6 @@
                         </Button>
                     </Grid>
 
-                    <!-- Progress Info Row -->
                     <Grid Grid.Row="1" Margin="22,8,0,0">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
@@ -148,15 +139,13 @@
                                    Visibility="{Binding Progress, Converter={StaticResource ProgressToVisibilityConverter}}"/>
                     </Grid>
 
-                    <!-- Progress Bar -->
                     <ProgressBar Grid.Row="2"
                                  Style="{StaticResource DownloadProgressBar}"
                                  Value="{Binding Progress}"
                                  Maximum="100"
                                  Margin="22,8,0,0"
-                                 Visibility="{Binding Task.Status, Converter={StaticResource BoolToVisibilityConverter}, ConverterParameter=invert}"/>
+                                 Visibility="{Binding IsActive, Converter={StaticResource BoolToVisibilityConverter}}"/>
 
-                    <!-- Error Display -->
                     <Border Grid.Row="2"
                             Background="#15F44336"
                             CornerRadius="6"
@@ -172,7 +161,6 @@
             </Border>
         </DataTemplate>
 
-        <!-- ListBox Item Container Style -->
         <Style x:Key="DownloadListItemContainer" TargetType="ListBoxItem">
             <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
             <Setter Property="Padding" Value="0"/>
@@ -197,7 +185,6 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- Header / Toolbar -->
         <Border Grid.Row="0" 
                 Background="{StaticResource BackgroundBrush}"
                 BorderBrush="{StaticResource BorderBrush}"
@@ -210,7 +197,6 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
-                <!-- Logo + Title -->
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
                     <Border Width="32" Height="32" 
                             CornerRadius="6"
@@ -230,7 +216,6 @@
                     </StackPanel>
                 </StackPanel>
 
-                <!-- Center: Clear Completed (when available) -->
                 <Button Grid.Column="1"
                         Style="{StaticResource ActionButtonStyle}"
                         Content="Clear Completed"
@@ -239,7 +224,6 @@
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center"/>
 
-                <!-- Window Controls -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                     <Button Style="{StaticResource IconButtonStyle}"
                             Command="{Binding MinimizeToTrayCommand}"
@@ -258,9 +242,7 @@
             </Grid>
         </Border>
 
-        <!-- Main Content Area -->
         <Grid Grid.Row="1">
-            <!-- Empty State -->
             <Grid Visibility="{Binding HasDownloads, Converter={StaticResource BoolToVisibilityConverter}, ConverterParameter=invert}"
                   VerticalAlignment="Center"
                   HorizontalAlignment="Center">
@@ -281,7 +263,6 @@
                 </StackPanel>
             </Grid>
 
-            <!-- Download Queue List -->
             <ScrollViewer Visibility="{Binding HasDownloads, Converter={StaticResource BoolToVisibilityConverter}}"
                           VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled"
@@ -296,7 +277,6 @@
             </ScrollViewer>
         </Grid>
 
-        <!-- Status Bar -->
         <Border Grid.Row="2"
                 Background="{StaticResource SurfaceBrush}"
                 BorderBrush="{StaticResource BorderBrush}"
@@ -309,7 +289,6 @@
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                    <!-- Status Dot -->
                     <Ellipse Width="8" Height="8" Fill="{StaticResource AccentBrush}" Margin="0,0,8,0" VerticalAlignment="Center">
                         <Ellipse.Triggers>
                             <EventTrigger RoutedEvent="Ellipse.Loaded">

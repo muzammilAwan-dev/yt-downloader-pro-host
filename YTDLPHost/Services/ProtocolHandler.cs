@@ -85,8 +85,7 @@ namespace YTDLPHost.Services
 
         private static string GetExecutablePath()
         {
-            var assembly = Assembly.GetExecutingAssembly();
-            var path = assembly.Location;
+            var path = Environment.ProcessPath;
 
             if (string.IsNullOrEmpty(path))
             {

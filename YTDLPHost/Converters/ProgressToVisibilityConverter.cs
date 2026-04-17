@@ -75,13 +75,17 @@ namespace YTDLPHost.Converters
         }
     }
 
-    [ValueConversion(typeof(DownloadStatus), typeof(bool))]
+    [ValueConversion(typeof(DownloadStatus), typeof(Visibility))]
     public class CanRemoveConverter : IValueConverter
     {
         public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
         {
-            return value is DownloadStatus status &&
-                   (status == DownloadStatus.Completed || status == DownloadStatus.Error || status == DownloadStatus.Cancelled);
+            if (value is DownloadStatus status)
+            {
+                bool canRemove = status == DownloadStatus.Completed || status == DownloadStatus.Error || status == DownloadStatus.Cancelled;
+                return canRemove ? Visibility.Visible : Visibility.Collapsed;
+            }
+            return Visibility.Collapsed;
         }
 
         public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)

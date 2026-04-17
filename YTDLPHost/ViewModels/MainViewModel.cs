@@ -97,7 +97,10 @@ namespace YTDLPHost.ViewModels
                     RedirectStandardOutput = true
                 };
                 using var proc = System.Diagnostics.Process.Start(psi);
-                proc?.WaitForExit(5000);
+                if (proc != null)
+                {
+                    proc.WaitForExit(5000);
+                }
             }
             catch
             {
@@ -160,7 +163,6 @@ namespace YTDLPHost.ViewModels
                     }
                 }
 
-                // Extract resolution from command
                 var resolution = ExtractResolution(command);
 
                 var task = new DownloadTask
@@ -358,7 +360,6 @@ namespace YTDLPHost.ViewModels
                 }
             }
 
-            // Fallback to save directory
             var saveDir = ExtractSaveDirectory(vm.Task.Command);
             if (Directory.Exists(saveDir))
             {
@@ -422,7 +423,10 @@ namespace YTDLPHost.ViewModels
 
         private static string DecodeBase64(string input)
         {
-            var bytes = Convert.FromBase64String(input);
+            string padded = input.Replace('-', '+').Replace('_', '/');
+            padded = padded.PadRight(padded.Length + (4 - padded.Length % 4) % 4, '=');
+            
+            var bytes = Convert.FromBase64String(padded);
             return Encoding.UTF8.GetString(bytes);
         }
 

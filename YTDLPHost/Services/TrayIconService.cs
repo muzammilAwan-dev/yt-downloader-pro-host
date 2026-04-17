@@ -45,7 +45,6 @@ namespace YTDLPHost.Services
             _notifyIcon.ContextMenuStrip = contextMenu;
             _notifyIcon.DoubleClick += (s, e) => ShowWindowRequested?.Invoke(this, EventArgs.Empty);
 
-            // Subscribe to toast activation
             try
             {
                 ToastNotificationManagerCompat.OnActivated += toastArgs =>
@@ -56,14 +55,13 @@ namespace YTDLPHost.Services
                     });
                 };
             }
-            catch { /* Toast notifications may not be available */ }
+            catch { }
         }
 
         private static System.Drawing.Icon? LoadApplicationIcon()
         {
             try
             {
-                // Method 1: Load from embedded resource
                 var assembly = Assembly.GetExecutingAssembly();
                 using var stream = assembly.GetManifestResourceStream("YTDLPHost.Assets.icon.ico");
                 if (stream != null)
@@ -75,8 +73,8 @@ namespace YTDLPHost.Services
 
             try
             {
-                // Method 2: Load from application directory
-                var exeDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+                var exePath = Environment.ProcessPath;
+                var exeDir = !string.IsNullOrEmpty(exePath) ? Path.GetDirectoryName(exePath) : null;
                 if (!string.IsNullOrEmpty(exeDir))
                 {
                     var iconPath = Path.Combine(exeDir, "Assets", "icon.ico");
@@ -90,11 +88,10 @@ namespace YTDLPHost.Services
 
             try
             {
-                // Method 3: Use the executable's own icon
-                var exePath = Assembly.GetExecutingAssembly().Location;
-                if (!string.IsNullOrEmpty(exePath) && File.Exists(exePath))
+                var processPath = Environment.ProcessPath;
+                if (!string.IsNullOrEmpty(processPath) && File.Exists(processPath))
                 {
-                    return System.Drawing.Icon.ExtractAssociatedIcon(exePath);
+                    return System.Drawing.Icon.ExtractAssociatedIcon(processPath);
                 }
             }
             catch { }
@@ -124,7 +121,6 @@ namespace YTDLPHost.Services
             }
             catch
             {
-                // Fallback to classic balloon tip
                 _notifyIcon.BalloonTipTitle = title;
                 _notifyIcon.BalloonTipText = message;
                 _notifyIcon.BalloonTipIcon = icon;

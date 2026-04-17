@@ -18,22 +18,16 @@ namespace YTDLPHost
         {
             base.OnStartup(e);
 
-            // Check if yt-dlp is available
-            CheckYtDlpPresence();
-
-            // Register protocol handler if needed
             if (!ProtocolHandler.IsRegistered())
             {
                 ProtocolHandler.Register();
             }
 
-            // Initialize single instance manager
             _singleInstanceManager = new SingleInstanceManager();
             var isFirstInstance = _singleInstanceManager.Initialize();
 
             if (!isFirstInstance)
             {
-                // Forward URL to running instance and exit
                 var url = e.Args.FirstOrDefault();
                 if (!string.IsNullOrEmpty(url))
                 {
@@ -44,7 +38,6 @@ namespace YTDLPHost
                 }
                 else
                 {
-                    // No URL, just signal to show window
                     _ = Task.Run(async () =>
                     {
                         await SingleInstanceManager.SendUrlToRunningInstanceAsync("ytdlp://show");
@@ -56,23 +49,18 @@ namespace YTDLPHost
                 return;
             }
 
-            // First instance - set up URL received handler
             _singleInstanceManager.UrlReceived += OnUrlReceived;
 
-            // Create ViewModel
             _mainViewModel = new MainViewModel();
             _mainViewModel.RequestShowWindow += OnRequestShowWindow;
 
-            // Create main window
             _mainWindow = new MainWindow { DataContext = _mainViewModel };
             _mainWindow.Closing += OnMainWindowClosing;
             _mainWindow.StateChanged += OnMainWindowStateChanged;
 
-            // Show window initially
             _mainWindow.Show();
             _mainWindow.Activate();
 
-            // Process command line URL if provided
             var startupUrl = e.Args.FirstOrDefault();
             if (!string.IsNullOrEmpty(startupUrl) && startupUrl.StartsWith("ytdlp://"))
             {
@@ -122,7 +110,6 @@ namespace YTDLPHost
 
         private void OnMainWindowClosing(object? sender, System.ComponentModel.CancelEventArgs e)
         {
-            // Cancel the close and minimize to tray instead
             e.Cancel = true;
             _mainWindow?.Hide();
             _mainViewModel!.IsWindowVisible = false;
@@ -142,40 +129,6 @@ namespace YTDLPHost
             _mainViewModel?.Dispose();
             _singleInstanceManager?.Dispose();
             base.OnExit(e);
-        }
-
-        private static void CheckYtDlpPresence()
-        {
-            try
-            {
-                var psi = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = "yt-dlp.exe",
-                    Arguments = "--version",
-                    CreateNoWindow = true,
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true
-                };
-
-                using var proc = System.Diagnostics.Process.Start(psi);
-                if (proc == null) return;
-                proc.WaitForExit(5000);
-
-                if (proc.ExitCode != 0)
-                {
-                    MessageBox.Show(
-                        "yt-dlp.exe was found but returned an error.\n\n" +
-                        "Please ensure yt-dlp is correctly installed.",
-                        "YT Downloader Pro - Warning",
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Warning);
-                }
-            }
-            catch (System.ComponentModel.Win32Exception)
-            {
-                // yt-dlp not found - will show dialog in MainViewModel
-            }
         }
     }
 }
