@@ -270,12 +270,12 @@ namespace YTDLPHost.ViewModels
             }
         }
 
-        private void OnRunnerError(object? sender, ErrorEventArgs e)
+        private void OnRunnerError(object? sender, DownloadErrorEventArgs e)
         {
             var vm = _downloads.FirstOrDefault(d => d.Id == e.TaskId);
             if (vm != null)
             {
-                Application.Current?.Dispatcher.BeginInvoke(() =>
+                System.Windows.Application.Current?.Dispatcher.BeginInvoke(() =>
                 {
                     vm.Refresh();
                     UpdateActiveCount();
@@ -288,14 +288,14 @@ namespace YTDLPHost.ViewModels
             var vm = _downloads.FirstOrDefault(d => d.Id == e.TaskId);
             if (vm != null)
             {
-                Application.Current?.Dispatcher.BeginInvoke(() => vm.Refresh());
+                System.Windows.Application.Current?.Dispatcher.BeginInvoke(() => vm.Refresh());
             }
         }
 
         private async Task DelayedRemoveAsync(DownloadItemViewModel vm)
         {
             await Task.Delay(TimeSpan.FromMinutes(5));
-            Application.Current?.Dispatcher.BeginInvoke(() =>
+            System.Windows.Application.Current?.Dispatcher.BeginInvoke(() =>
             {
                 if (vm.Task.Status == DownloadStatus.Completed && _downloads.Contains(vm))
                 {
@@ -479,7 +479,7 @@ namespace YTDLPHost.ViewModels
             _currentRunner?.Cancel();
             _currentRunner?.Dispose();
 
-            Application.Current?.Shutdown();
+            System.Windows.Application.Current?.Shutdown();
         }
 
         public void ShowTrayIcon() => _trayService.SetVisible(true);

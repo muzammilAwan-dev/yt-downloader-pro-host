@@ -61,7 +61,7 @@ namespace YTDLPHost.Services
 
                     if (!string.IsNullOrWhiteSpace(url))
                     {
-                        Application.Current?.Dispatcher.BeginInvoke(
+                        System.Windows.Application.Current?.Dispatcher.BeginInvoke(
                             DispatcherPriority.Normal,
                             () => UrlReceived?.Invoke(this, url.Trim()));
                     }

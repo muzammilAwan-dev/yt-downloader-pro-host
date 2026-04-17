@@ -8,7 +8,7 @@ using YTDLPHost.ViewModels;
 
 namespace YTDLPHost
 {
-    public partial class App : Application
+    public partial class App : System.Windows.Application
     {
         private SingleInstanceManager? _singleInstanceManager;
         private MainViewModel? _mainViewModel;

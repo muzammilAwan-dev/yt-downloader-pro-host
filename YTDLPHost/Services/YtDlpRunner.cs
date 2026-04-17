@@ -19,7 +19,7 @@ namespace YTDLPHost.Services
 
         public event EventHandler<ProgressEventArgs>? OnProgressUpdate;
         public event EventHandler<CompleteEventArgs>? OnDownloadComplete;
-        public event EventHandler<ErrorEventArgs>? OnDownloadError;
+        public event EventHandler<DownloadErrorEventArgs>? OnDownloadError;
         public event EventHandler<ExtractedInfoEventArgs>? OnInfoExtracted;
 
         public bool IsRunning => _process != null && !_process.HasExited;
@@ -104,14 +104,14 @@ namespace YTDLPHost.Services
                         ? "Download failed. Check yt-dlp output for details."
                         : lastErrors;
 
-                    OnDownloadError?.Invoke(this, new ErrorEventArgs(task.Id, task.ErrorMessage));
+                    OnDownloadError?.Invoke(this, new DownloadErrorEventArgs(task.Id, task.ErrorMessage));
                 }
             }
             catch (Exception ex)
             {
                 task.Status = DownloadStatus.Error;
                 task.ErrorMessage = $"Execution error: {ex.Message}";
-                OnDownloadError?.Invoke(this, new ErrorEventArgs(task.Id, task.ErrorMessage));
+                OnDownloadError?.Invoke(this, new DownloadErrorEventArgs(task.Id, task.ErrorMessage));
             }
             finally
             {
@@ -311,7 +311,7 @@ namespace YTDLPHost.Services
         }
     }
 
-    public class ErrorEventArgs : EventArgs
+    public class DownloadErrorEventArgs : EventArgs
     {
         public Guid TaskId { get; }
         public string ErrorMessage { get; }
