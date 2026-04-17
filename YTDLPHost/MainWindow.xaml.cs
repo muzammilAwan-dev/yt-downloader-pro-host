@@ -1,6 +1,6 @@
-using System;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using YTDLPHost.ViewModels;
 using YTDLPHost.Services;
 
@@ -81,7 +81,7 @@ namespace YTDLPHost
             menu.Items.Add(new Separator { Background = (System.Windows.Media.Brush)FindResource("BorderBrush") });
             menu.Items.Add(exitItem);
 
-            if (sender is Button btn)
+            if (sender is System.Windows.Controls.Button btn)
             {
                 menu.PlacementTarget = btn;
                 menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
