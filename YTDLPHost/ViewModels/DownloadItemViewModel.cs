@@ -20,18 +20,42 @@ namespace YTDLPHost.ViewModels
 
         public Guid Id => Task.Id;
         public string DisplayTitle => Task.Title == "Unknown" ? "YouTube Video..." : Task.Title;
-        public string ProgressDisplay => $"{Task.Status} | {Task.Speed} | ETA: {Task.Eta}";
         public string ResolutionDisplay => Task.Resolution;
+        public double Progress => Task.Progress;
+        public string ErrorMessage => Task.ErrorMessage;
+
+        // FIXED: Dynamically builds the text based on Playlist, Phase, and Status
+        public string ProgressDisplay
+        {
+            get
+            {
+                if (Task.Status == DownloadStatus.Completed) return "Completed";
+                if (Task.Status == DownloadStatus.Error) return "Error";
+                if (Task.Status == DownloadStatus.Cancelled) return "Cancelled";
+                if (Task.Status == DownloadStatus.Paused) return "Paused";
+                if (Task.Status == DownloadStatus.Queued) return "Queued";
+
+                string prefix = string.IsNullOrEmpty(Task.PlaylistInfo) 
+                    ? Task.CurrentPhase 
+                    : $"{Task.PlaylistInfo} - {Task.CurrentPhase}";
+
+                if (Task.IsIndeterminate) return prefix; // Merging doesn't have Speed/ETA
+                
+                string speedEta = "";
+                if (!string.IsNullOrEmpty(Task.Speed)) speedEta += $" | {Task.Speed}";
+                if (!string.IsNullOrEmpty(Task.Eta) && Task.Eta != "Unknown") speedEta += $" | ETA: {Task.Eta}";
+                
+                return $"{prefix}{speedEta}";
+            }
+        }
+
         public bool IsCompleted => Task.Status == DownloadStatus.Completed;
         public bool IsActive => Task.Status == DownloadStatus.Downloading || Task.Status == DownloadStatus.Queued;
         public bool HasError => Task.Status == DownloadStatus.Error;
-        public bool IsCancellable => Task.Status == DownloadStatus.Downloading || Task.Status == DownloadStatus.Queued;
-        
-        // NEW: Property to determine if we can resume the download
-        public bool IsResumable => Task.Status == DownloadStatus.Cancelled || Task.Status == DownloadStatus.Error;
-        
-        public string ErrorMessage => Task.ErrorMessage;
-        public double Progress => Task.Progress;
+        public bool IsResumable => Task.Status == DownloadStatus.Paused || Task.Status == DownloadStatus.Error;
+        public bool CanBePaused => IsActive;
+        public bool CanBeCancelled => IsActive || Task.Status == DownloadStatus.Paused;
+        public bool CanBeRemoved => Task.Status == DownloadStatus.Completed || Task.Status == DownloadStatus.Error || Task.Status == DownloadStatus.Cancelled;
 
         public ICommand ToggleLogCommand { get; }
 
@@ -46,11 +70,17 @@ namespace YTDLPHost.ViewModels
                     OnPropertyChanged(nameof(IsCompleted));
                     OnPropertyChanged(nameof(IsActive));
                     OnPropertyChanged(nameof(HasError));
-                    OnPropertyChanged(nameof(IsCancellable));
                     OnPropertyChanged(nameof(IsResumable));
+                    OnPropertyChanged(nameof(CanBePaused));
+                    OnPropertyChanged(nameof(CanBeCancelled));
+                    OnPropertyChanged(nameof(CanBeRemoved));
                     OnPropertyChanged(nameof(ProgressDisplay));
                 }
-                else if (e.PropertyName == nameof(Task.Speed) || e.PropertyName == nameof(Task.Eta))
+                else if (e.PropertyName == nameof(Task.Speed) || 
+                         e.PropertyName == nameof(Task.Eta) || 
+                         e.PropertyName == nameof(Task.CurrentPhase) || 
+                         e.PropertyName == nameof(Task.PlaylistInfo) || 
+                         e.PropertyName == nameof(Task.IsIndeterminate))
                 {
                     OnPropertyChanged(nameof(ProgressDisplay));
                 }
