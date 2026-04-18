@@ -99,6 +99,20 @@ namespace YTDLPHost.ViewModels
             };
 
             CheckYtDlpExists();
+
+            // [FIX APPLIED] SILENT ENGINE UPDATE: Keeps yt-dlp healthy without bothering the user
+            _ = Task.Run(() => {
+                try 
+                { 
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo 
+                    { 
+                        FileName = "yt-dlp.exe", 
+                        Arguments = "-U", 
+                        CreateNoWindow = true, 
+                        UseShellExecute = false 
+                    }); 
+                } catch { }
+            });
         }
 
         private async void CheckYtDlpExists()
@@ -191,6 +205,9 @@ namespace YTDLPHost.ViewModels
                     System.Windows.MessageBox.Show("A potentially unsafe download command was blocked for your security.", "YT Downloader Pro - Security Alert", MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
                 }
+
+                // [FIX APPLIED] GUI SAFETY: Force --progress so the UI progress bar never breaks on custom commands
+                if (!command.Contains("--progress")) command += " --progress";
 
                 string? cookieContent = null;
                 string? cookieFilePath = null;
@@ -321,7 +338,15 @@ namespace YTDLPHost.ViewModels
         private void OnRunnerInfo(object? sender, ExtractedInfoEventArgs e)
         {
             var vm = _downloads.FirstOrDefault(d => d.Id == e.TaskId);
-            if (vm != null) System.Windows.Application.Current?.Dispatcher.BeginInvoke(() => vm.Refresh());
+            if (vm != null) 
+            {
+                System.Windows.Application.Current?.Dispatcher.BeginInvoke(() => 
+                {
+                    vm.Refresh();
+                    // [FIX APPLIED] FOOTER TITLE SYNC: Updates bottom status bar instantly when title is found
+                    if (vm.Task.Status == DownloadStatus.Downloading) StatusText = $"Downloading: {vm.DisplayTitle}";
+                });
+            }
         }
 
         private void PauseDownload(DownloadItemViewModel? vm)
@@ -351,7 +376,6 @@ namespace YTDLPHost.ViewModels
             CleanupCookieFile(vm.Task);
         }
 
-        // THREAD-SAFETY FIX: Added .Distinct() to safely iterate the ConcurrentBag
         private void CleanupPartialFiles(DownloadTask task, bool forceDeleteAll = false)
         {
             foreach (var filePath in task.TrackedFiles.Distinct().ToList())
