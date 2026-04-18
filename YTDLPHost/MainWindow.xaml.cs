@@ -3,11 +3,12 @@ using System.Windows.Controls;
 using YTDLPHost.ViewModels;
 using YTDLPHost.Services;
 
-// EXPLICIT ALIASES: Resolves the ambiguous reference between WPF and WinForms
+// EXPLICIT ALIASES: Resolves the ambiguous references between WPF and WinForms
 using Button = System.Windows.Controls.Button;
 using ContextMenu = System.Windows.Controls.ContextMenu;
 using MenuItem = System.Windows.Controls.MenuItem;
 using Separator = System.Windows.Controls.Separator;
+using MessageBox = System.Windows.MessageBox;
 
 namespace YTDLPHost
 {
@@ -69,7 +70,7 @@ namespace YTDLPHost
             registerItem.Click += (s, args) =>
             {
                 ProtocolHandler.Register();
-                MessageBox.Show(this, "Protocol handler registered.", "YT Downloader Pro", MessageBoxButton.OK, MessageBoxImage.Information);
+                System.Windows.MessageBox.Show(this, "Protocol handler registered.", "YT Downloader Pro", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
             };
 
             var unregisterItem = new MenuItem
@@ -81,7 +82,7 @@ namespace YTDLPHost
             unregisterItem.Click += (s, args) =>
             {
                 ProtocolHandler.Unregister();
-                MessageBox.Show(this, "Protocol handler unregistered.", "YT Downloader Pro", MessageBoxButton.OK, MessageBoxImage.Information);
+                System.Windows.MessageBox.Show(this, "Protocol handler unregistered.", "YT Downloader Pro", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
             };
 
             var exitItem = new MenuItem
