@@ -12,6 +12,16 @@ namespace YTDLPHost.Services
 {
     public class YtDlpRunner : IDisposable
     {
+        // CPU OPTIMIZATION: Compiled Regexes initialize once and run instantaneously
+        private static readonly Regex CmdTrimRegex = new(@"^(?:yt-dlp\.exe|yt-dlp)\s+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex PercentRegex = new(@"\[download\]\s+(?:(\d+\.?\d*)%|100%)", RegexOptions.Compiled);
+        private static readonly Regex SpeedRegex = new(@"at\s+([\d\.]+[KMG]iB/s)", RegexOptions.Compiled);
+        private static readonly Regex EtaRegex = new(@"ETA\s+([\d:]+)", RegexOptions.Compiled);
+        private static readonly Regex DestRegex = new(@"Destination:\s+(.+)", RegexOptions.Compiled);
+        private static readonly Regex PlaylistRegex = new(@"Downloading item (\d+) of (\d+)", RegexOptions.Compiled);
+        private static readonly Regex OutputTemplateRegex = new(@"-o\s+""([^""]+)""", RegexOptions.Compiled);
+        private static readonly Regex PathTemplateRegex = new(@"-P\s+""([^""]+)""", RegexOptions.Compiled);
+
         private Process? _process;
         private readonly CancellationTokenSource _cts = new();
         private readonly StringBuilder _errorBuffer = new();
@@ -36,7 +46,7 @@ namespace YTDLPHost.Services
             task.IsIndeterminate = true;
 
             var command = task.Command.Trim();
-            command = Regex.Replace(command, @"^(?:yt-dlp\.exe|yt-dlp)\s+", "", RegexOptions.IgnoreCase);
+            command = CmdTrimRegex.Replace(command, "");
 
             task.AppendLog("=== Download Task Started ===");
             task.AppendLog($"Command executed: yt-dlp.exe {command}");
@@ -101,7 +111,7 @@ namespace YTDLPHost.Services
                     task.Status = DownloadStatus.Error;
                     task.IsIndeterminate = false;
                     task.ErrorMessage = string.IsNullOrWhiteSpace(lastErrors)
-                        ? $"Download failed (Code: {_process.ExitCode}). Check full logs for details."
+                        ? $"Download failed (Code: {_process.ExitCode}). Check logs for details."
                         : lastErrors;
                     
                     task.AppendLog("");
@@ -136,10 +146,9 @@ namespace YTDLPHost.Services
             bool needsUiUpdate = false;
             double oldProgress = task.Progress;
 
-            // 1. Playlist Item Tracking
             if (data.Contains("[download] Downloading item"))
             {
-                var match = Regex.Match(data, @"Downloading item (\d+) of (\d+)");
+                var match = PlaylistRegex.Match(data);
                 if (match.Success)
                 {
                     task.PlaylistInfo = $"Item {match.Groups[1].Value}/{match.Groups[2].Value}";
@@ -147,7 +156,6 @@ namespace YTDLPHost.Services
                 }
             }
 
-            // 2. Info Extraction Phase
             if (!_extractionComplete && (data.Contains("[youtube]") || data.Contains("[info]")))
             {
                 _extractionComplete = true;
@@ -159,10 +167,9 @@ namespace YTDLPHost.Services
                 }
             }
 
-            // 3. Regular Downloading Phase
             if (data.Contains("[download]") && data.Contains("%"))
             {
-                task.IsIndeterminate = false; // Turn off animation since we have numbers
+                task.IsIndeterminate = false; 
                 
                 if (task.Status != DownloadStatus.Downloading)
                 {
@@ -170,44 +177,34 @@ namespace YTDLPHost.Services
                     needsUiUpdate = true;
                 }
 
-                var percentMatch = Regex.Match(data, @"\[download\]\s+(?:(\d+\.?\d*)%|100%)");
+                var percentMatch = PercentRegex.Match(data);
                 if (percentMatch.Success)
                 {
                     if (double.TryParse(percentMatch.Groups[1].Value, out var percent))
                     {
                         percent = Math.Min(percent, 100.0);
-                        
-                        // Detect when 100% video stream resets to 0% for audio stream
                         if (percent < task.Progress && task.Progress >= 99.0)
-                        {
                             task.CurrentPhase = "Downloading Audio...";
-                        }
                         else if (task.CurrentPhase == "Extracting Info..." || task.CurrentPhase == "Starting...")
-                        {
                             task.CurrentPhase = "Downloading Video...";
-                        }
                         
                         task.Progress = percent;
                     }
-                    else if (data.Contains("100%"))
-                    {
-                        task.Progress = 100.0;
-                    }
+                    else if (data.Contains("100%")) task.Progress = 100.0;
                     
                     if (task.Progress != oldProgress) needsUiUpdate = true;
                 }
 
-                var speedMatch = Regex.Match(data, @"at\s+([\d\.]+[KMG]iB/s)");
+                var speedMatch = SpeedRegex.Match(data);
                 if (speedMatch.Success) { task.Speed = speedMatch.Groups[1].Value; needsUiUpdate = true; }
 
-                var etaMatch = Regex.Match(data, @"ETA\s+([\d:]+)");
+                var etaMatch = EtaRegex.Match(data);
                 if (etaMatch.Success) { task.Eta = etaMatch.Groups[1].Value; needsUiUpdate = true; }
             }
 
-            // 4. Record Standard Destination
             if (data.Contains("Destination:", StringComparison.OrdinalIgnoreCase) && !data.Contains("[Merger]") && !data.Contains("[ExtractAudio]"))
             {
-                var destMatch = Regex.Match(data, @"Destination:\s+(.+)");
+                var destMatch = DestRegex.Match(data);
                 if (destMatch.Success)
                 {
                     task.OutputPath = destMatch.Groups[1].Value.Trim();
@@ -219,7 +216,6 @@ namespace YTDLPHost.Services
                 }
             }
 
-            // 5. Detect FFmpeg Merging Phase
             if (data.Contains("[Merger]") || data.Contains("[ExtractAudio]") || data.Contains("[MoveFiles]") || data.Contains("Fixing MPEG-TS"))
             {
                 task.CurrentPhase = "Merging & Finalizing...";
@@ -230,7 +226,7 @@ namespace YTDLPHost.Services
 
                 if (data.Contains("Destination:"))
                 {
-                    var destMatch = Regex.Match(data, @"Destination:\s+(.+)");
+                    var destMatch = DestRegex.Match(data);
                     if (destMatch.Success)
                     {
                         task.OutputPath = destMatch.Groups[1].Value.Trim();
@@ -261,7 +257,7 @@ namespace YTDLPHost.Services
 
         private static string ExtractSaveDirectory(string command)
         {
-            var match = Regex.Match(command, @"-o\s+""([^""]+)""");
+            var match = OutputTemplateRegex.Match(command);
             if (match.Success)
             {
                 var template = match.Groups[1].Value;
@@ -273,7 +269,7 @@ namespace YTDLPHost.Services
                 }
             }
 
-            match = Regex.Match(command, @"-P\s+""([^""]+)""");
+            match = PathTemplateRegex.Match(command);
             if (match.Success)
             {
                 var dir = Environment.ExpandEnvironmentVariables(match.Groups[1].Value);
