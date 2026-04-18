@@ -42,20 +42,27 @@
                         <Border Grid.Column="0" 
                                 Width="10" Height="10" 
                                 CornerRadius="5"
-                                Background="{Binding Task.Status, Converter={StaticResource StatusToColorConverter}}"
                                 Margin="0,0,12,0"
                                 VerticalAlignment="Center">
-                            <Border.Triggers>
-                                <DataTrigger Binding="{Binding Task.Status}" Value="Downloading">
-                                    <DataTrigger.EnterActions>
-                                        <BeginStoryboard>
-                                            <Storyboard RepeatBehavior="Forever" AutoReverse="True">
-                                                <DoubleAnimation Storyboard.TargetProperty="Opacity" From="1" To="0.4" Duration="0:0:0.8"/>
-                                            </Storyboard>
-                                        </BeginStoryboard>
-                                    </DataTrigger.EnterActions>
-                                </DataTrigger>
-                            </Border.Triggers>
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="Background" Value="{Binding Task.Status, Converter={StaticResource StatusToColorConverter}}"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Task.Status}" Value="Downloading">
+                                            <DataTrigger.EnterActions>
+                                                <BeginStoryboard Name="BlinkingAnimation">
+                                                    <Storyboard RepeatBehavior="Forever" AutoReverse="True">
+                                                        <DoubleAnimation Storyboard.TargetProperty="Opacity" From="1" To="0.4" Duration="0:0:0.8"/>
+                                                    </Storyboard>
+                                                </BeginStoryboard>
+                                            </DataTrigger.EnterActions>
+                                            <DataTrigger.ExitActions>
+                                                <StopStoryboard BeginStoryboardName="BlinkingAnimation"/>
+                                            </DataTrigger.ExitActions>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
                         </Border>
 
                         <TextBlock Grid.Column="1" 
@@ -144,7 +151,7 @@
                                  Value="{Binding Progress}"
                                  Maximum="100"
                                  Margin="22,8,0,0"
-                                 Visibility="{Binding IsActive, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                                 Visibility="{Binding Task.Status, Converter={StaticResource BoolToVisibilityConverter}, ConverterParameter=invert}"/>
 
                     <Border Grid.Row="2"
                             Background="#15F44336"
