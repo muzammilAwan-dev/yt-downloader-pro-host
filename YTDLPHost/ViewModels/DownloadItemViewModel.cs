@@ -20,7 +20,7 @@ namespace YTDLPHost.ViewModels
 
         public Guid Id => Task.Id;
 
-        // Displays "YouTube Video..." until the real title is fetched by the runner
+        // UI SYNC: Keeps the display clean while yt-dlp fetches the real title
         public string DisplayTitle => (Task.Title == "Unknown" || Task.Title.Contains("Fetching")) 
             ? "YouTube Video..." 
             : Task.Title;
@@ -30,30 +30,25 @@ namespace YTDLPHost.ViewModels
         public string ErrorMessage => Task.ErrorMessage;
 
         /// <summary>
-        /// THE ENGINE OF THE UI CARD:
-        /// This property dynamically builds the status string based on the current download phase.
+        /// Dynamically builds the status string based on the current download phase.
         /// Example: "Downloading Video | 45.5% of 63.31MiB | 1.2MiB/s | ETA: 00:05"
         /// </summary>
         public string ProgressDisplay
         {
             get
             {
-                // Handle static states first
                 if (Task.Status == DownloadStatus.Completed) return "Completed";
-                if (Task.Status == DownloadStatus.Error) return "Error - Click for details";
+                if (Task.Status == DownloadStatus.Error) return "Error - Click to view logs";
                 if (Task.Status == DownloadStatus.Cancelled) return "Cancelled";
                 if (Task.Status == DownloadStatus.Paused) return "Paused";
                 if (Task.Status == DownloadStatus.Queued) return "Waiting in Queue...";
 
-                // Build the active download string
                 string prefix = string.IsNullOrEmpty(Task.PlaylistInfo) 
                     ? Task.CurrentPhase 
                     : $"{Task.PlaylistInfo} - {Task.CurrentPhase}";
 
-                // If we are in an indeterminate phase (like Merging), just show the phase name
                 if (Task.IsIndeterminate) return prefix;
                 
-                // Construct the measurement string
                 string sizeStr = string.IsNullOrEmpty(Task.FileSize) ? "" : $" of {Task.FileSize}";
                 string details = $" | {Task.Progress:0.0}%{sizeStr}";
                 
@@ -67,7 +62,6 @@ namespace YTDLPHost.ViewModels
             }
         }
 
-        // Computed boolean properties for UI Binding (Visibility/Enablement)
         public bool IsCompleted => Task.Status == DownloadStatus.Completed;
         public bool IsActive => Task.Status == DownloadStatus.Downloading || Task.Status == DownloadStatus.Queued;
         public bool HasError => Task.Status == DownloadStatus.Error;
@@ -82,7 +76,7 @@ namespace YTDLPHost.ViewModels
         {
             Task = task;
             
-            // Listen for changes in the Model (DownloadTask) and notify the UI View
+            // Listen for changes in the background runner and notify the WPF UI
             Task.PropertyChanged += (s, e) =>
             {
                 if (e.PropertyName == nameof(Task.Status))
@@ -97,7 +91,6 @@ namespace YTDLPHost.ViewModels
                          e.PropertyName == nameof(Task.IsIndeterminate) ||
                          e.PropertyName == nameof(Task.Progress))
                 {
-                    // Any of these change, we must rebuild the entire ProgressDisplay string
                     OnPropertyChanged(nameof(ProgressDisplay));
                     OnPropertyChanged(nameof(Progress));
                 }
