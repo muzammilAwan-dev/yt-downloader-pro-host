@@ -16,53 +16,54 @@ namespace YTDLPHost
 
         protected override void OnStartup(StartupEventArgs e)
         {
+            // 1. BULLETPROOFING: Catch all UI Thread Exceptions
+            this.DispatcherUnhandledException += (s, args) =>
+            {
+                MessageBox.Show($"UI Thread Crash Prevented:\n\n{args.Exception.Message}", "Fatal Error Caught", MessageBoxButton.OK, MessageBoxImage.Error);
+                args.Handled = true; 
+            };
+
+            // 2. BULLETPROOFING: Catch all Background Thread Exceptions
+            AppDomain.CurrentDomain.UnhandledException += (s, args) =>
+            {
+                if (args.ExceptionObject is Exception ex)
+                {
+                    MessageBox.Show($"Background Thread Crash:\n\n{ex.Message}", "Fatal Error Caught", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            };
+
             base.OnStartup(e);
 
-            // Register protocol handler if needed
             if (!ProtocolHandler.IsRegistered())
-            {
                 ProtocolHandler.Register();
-            }
 
-            // Initialize single instance manager
             _singleInstanceManager = new SingleInstanceManager();
             var isFirstInstance = _singleInstanceManager.Initialize();
 
             if (!isFirstInstance)
             {
-                // Forward URL to running instance and exit
-                var url = e.Args.FirstOrDefault();
-                if (!string.IsNullOrEmpty(url))
+                var url = e.Args.FirstOrDefault() ?? "ytdlp://show";
+                
+                // 3. DEADLOCK FIX: Never use .Wait() on the UI thread. Use background tasks.
+                Task.Run(async () => 
                 {
-                    SingleInstanceManager.SendUrlToRunningInstanceAsync(url).Wait(3000);
-                }
-                else
-                {
-                    SingleInstanceManager.SendUrlToRunningInstanceAsync("ytdlp://show").Wait(3000);
-                }
-
-                _singleInstanceManager.Dispose();
-                Shutdown(0);
+                    await SingleInstanceManager.SendUrlToRunningInstanceAsync(url);
+                    Environment.Exit(0);
+                });
                 return;
             }
 
-            // First instance - set up URL received handler
             _singleInstanceManager.UrlReceived += OnUrlReceived;
-
-            // Create ViewModel
             _mainViewModel = new MainViewModel();
             _mainViewModel.RequestShowWindow += OnRequestShowWindow;
 
-            // Create main window
             _mainWindow = new MainWindow { DataContext = _mainViewModel };
             _mainWindow.Closing += OnMainWindowClosing;
             _mainWindow.StateChanged += OnMainWindowStateChanged;
 
-            // Show window initially
             _mainWindow.Show();
             _mainWindow.Activate();
 
-            // Process command line URL if provided
             var startupUrl = e.Args.FirstOrDefault();
             if (!string.IsNullOrEmpty(startupUrl) && startupUrl.StartsWith("ytdlp://"))
             {
@@ -73,38 +74,21 @@ namespace YTDLPHost
         private void OnUrlReceived(object? sender, string url)
         {
             if (_mainViewModel == null) return;
-
-            if (url == "ytdlp://show")
+            Dispatcher.BeginInvoke(() =>
             {
-                Dispatcher.BeginInvoke(() =>
-                {
-                    ShowMainWindow();
-                });
-            }
-            else if (url.StartsWith("ytdlp://"))
-            {
-                Dispatcher.BeginInvoke(() =>
-                {
+                if (url != "ytdlp://show" && url.StartsWith("ytdlp://"))
                     _mainViewModel.ProcessUrl(url);
-                    ShowMainWindow();
-                });
-            }
+                ShowMainWindow();
+            });
         }
 
-        private void OnRequestShowWindow(object? sender, EventArgs e)
-        {
-            Dispatcher.BeginInvoke(ShowMainWindow);
-        }
+        private void OnRequestShowWindow(object? sender, EventArgs e) => Dispatcher.BeginInvoke(ShowMainWindow);
 
         private void ShowMainWindow()
         {
             if (_mainWindow == null) return;
-
             _mainWindow.Show();
-            if (_mainWindow.WindowState == WindowState.Minimized)
-            {
-                _mainWindow.WindowState = WindowState.Normal;
-            }
+            if (_mainWindow.WindowState == WindowState.Minimized) _mainWindow.WindowState = WindowState.Normal;
             _mainWindow.Activate();
             _mainWindow.Topmost = true;
             _mainWindow.Topmost = false;
@@ -112,7 +96,6 @@ namespace YTDLPHost
 
         private void OnMainWindowClosing(object? sender, System.ComponentModel.CancelEventArgs e)
         {
-            // Cancel the close and minimize to tray instead
             e.Cancel = true;
             _mainWindow?.Hide();
             _mainViewModel!.IsWindowVisible = false;
