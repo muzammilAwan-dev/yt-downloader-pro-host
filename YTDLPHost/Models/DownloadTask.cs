@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
@@ -48,7 +49,6 @@ namespace YTDLPHost.Models
         [ObservableProperty]
         private string _eta = "";
 
-        // REQUIRED FOR UI: Tracks the total file size
         [ObservableProperty]
         private string _fileSize = "";
 
@@ -82,8 +82,8 @@ namespace YTDLPHost.Models
         [ObservableProperty]
         private DateTime? _completedAt;
 
-        // REQUIRED FOR CLEANUP: Tracks every file yt-dlp touches
-        public HashSet<string> TrackedFiles { get; } = new();
+        // THREAD-SAFETY FIX: Replaced HashSet with ConcurrentBag to prevent UI thread crashes
+        public ConcurrentBag<string> TrackedFiles { get; } = new();
 
         private readonly StringBuilder _fullLogBuilder = new();
         private readonly Queue<string> _uiLogQueue = new();
@@ -123,7 +123,12 @@ namespace YTDLPHost.Models
                 _uiLogQueue.Clear();
                 UiLogText = "";
                 LogFileSaved = false;
-                TrackedFiles.Clear();
+                
+                // ConcurrentBag doesn't have a .Clear() method, so we safely empty it
+                while (!TrackedFiles.IsEmpty)
+                {
+                    TrackedFiles.TryTake(out _);
+                }
             }
         }
     }
