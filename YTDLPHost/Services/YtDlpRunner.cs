@@ -29,6 +29,9 @@ namespace YTDLPHost.Services
         private readonly StringBuilder _errorBuffer = new();
         private bool _extractionComplete;
         private bool _disposed;
+        
+        // BULLETPROOFING: Independent memory tracker for the current item sequence
+        private bool _hasStartedVideoMedia;
 
         private DateTime _lastUiUpdate = DateTime.MinValue;
 
@@ -43,6 +46,8 @@ namespace YTDLPHost.Services
         {
             _errorBuffer.Clear();
             _extractionComplete = false;
+            _hasStartedVideoMedia = false; // Reset for new task
+            
             task.ClearLog();
             task.CurrentPhase = "Starting...";
             task.IsIndeterminate = true;
@@ -154,7 +159,10 @@ namespace YTDLPHost.Services
                 if (match.Success)
                 {
                     task.PlaylistInfo = $"Item {match.Groups[1].Value}/{match.Groups[2].Value}";
+                    
+                    // REBOOT EVERYTHING for the next playlist item
                     _extractionComplete = false; 
+                    _hasStartedVideoMedia = false; 
                     task.Progress = 0.0;
                     task.CurrentPhase = "Starting...";
                     task.FileSize = "";
@@ -166,7 +174,6 @@ namespace YTDLPHost.Services
                 return; 
             }
 
-            // OPTIMIZATION: Fast-fail string checks prevent heavy Regex execution on 90% of console lines
             if (data.Contains("Destination:", StringComparison.OrdinalIgnoreCase) || 
                 data.Contains("Writing video", StringComparison.OrdinalIgnoreCase) || 
                 data.Contains("has already been downloaded", StringComparison.OrdinalIgnoreCase))
@@ -214,10 +221,16 @@ namespace YTDLPHost.Services
                         }
                         else
                         {
-                            if (task.CurrentPhase == "Downloading Video...") 
-                                task.CurrentPhase = "Downloading Audio...";
-                            else 
+                            // INDEPENDENT MEMORY TRACKER: Unbreakable state sequence
+                            if (!_hasStartedVideoMedia) 
+                            {
                                 task.CurrentPhase = "Downloading Video...";
+                                _hasStartedVideoMedia = true; // Locks in the video phase permanently for this item
+                            }
+                            else 
+                            {
+                                task.CurrentPhase = "Downloading Audio...";
+                            }
                         }
                         
                         needsUiUpdate = true;
