@@ -49,6 +49,7 @@ namespace YTDLPHost.Models
         [ObservableProperty]
         private string _eta = "";
 
+        // REQUIRED FOR UI: Tracks the total file size
         [ObservableProperty]
         private string _fileSize = "";
 
@@ -82,7 +83,7 @@ namespace YTDLPHost.Models
         [ObservableProperty]
         private DateTime? _completedAt;
 
-        // THREAD-SAFETY FIX: Replaced HashSet with ConcurrentBag to prevent UI thread crashes
+        // REQUIRED FOR CLEANUP & THREAD SAFETY: Tracks every file yt-dlp touches
         public ConcurrentBag<string> TrackedFiles { get; } = new();
 
         private readonly StringBuilder _fullLogBuilder = new();
