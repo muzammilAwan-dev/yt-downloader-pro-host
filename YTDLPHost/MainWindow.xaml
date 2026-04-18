@@ -267,15 +267,21 @@
                               Fill="White" Width="20" Height="20" Stretch="Uniform"/>
                     </Border>
                     <StackPanel VerticalAlignment="Center">
-                        <TextBlock Text="YT Downloader Pro" 
-                                   FontSize="17" 
-                                   FontWeight="SemiBold"
-                                   Foreground="{StaticResource TextPrimaryBrush}"/>
-                        <TextBlock Text="Native yt-dlp Host" 
-                                   FontSize="11" 
-                                   Foreground="{StaticResource TextMutedBrush}"/>
-                    </StackPanel>
-                </StackPanel>
+    <TextBlock Text="YT Downloader Pro" 
+               FontSize="17" 
+               FontWeight="SemiBold"
+               Foreground="{StaticResource TextPrimaryBrush}"/>
+    <StackPanel Orientation="Horizontal">
+        <TextBlock Text="Native yt-dlp Host" 
+                   FontSize="11" 
+                   Foreground="{StaticResource TextMutedBrush}"/>
+        <TextBlock Text=" • Crafted with ⚡ by muzammilAwan-dev" 
+                   FontSize="11" 
+                   FontWeight="SemiBold"
+                   Foreground="{StaticResource AccentBrush}" 
+                   Margin="4,0,0,0"/>
+    </StackPanel>
+</StackPanel>
 
                 <Button Grid.Column="1"
                         Style="{StaticResource ActionButtonStyle}"
