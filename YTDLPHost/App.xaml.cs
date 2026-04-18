@@ -18,28 +18,27 @@ namespace YTDLPHost
 
         protected override void OnStartup(StartupEventArgs e)
         {
-            // HARDWARE ACCELERATION FIX: Prevents GPU driver crashes under heavy UI load
+            // HARDWARE ACCELERATION FIX: Force CPU rendering to prevent GPU driver crashes under heavy UI load
             RenderOptions.ProcessRenderMode = RenderMode.SoftwareOnly;
 
-            // BULLETPROOFING: UI Thread Exception Handler
+            // 1. BULLETPROOFING: Catch all UI Thread Exceptions
             this.DispatcherUnhandledException += (s, args) =>
             {
-                System.Windows.MessageBox.Show($"UI Thread Error: {args.Exception.Message}", "YT Downloader Pro - Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                System.Windows.MessageBox.Show($"UI Thread Crash Prevented:\n\n{args.Exception.Message}", "Fatal Error Caught", MessageBoxButton.OK, MessageBoxImage.Error);
                 args.Handled = true; 
             };
 
-            // BULLETPROOFING: Background Thread Exception Handler
+            // 2. BULLETPROOFING: Catch all Background Thread Exceptions
             AppDomain.CurrentDomain.UnhandledException += (s, args) =>
             {
                 if (args.ExceptionObject is Exception ex)
                 {
-                    System.Windows.MessageBox.Show($"Background Thread Error: {ex.Message}", "YT Downloader Pro - Fatal Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    System.Windows.MessageBox.Show($"Background Thread Crash:\n\n{ex.Message}", "Fatal Error Caught", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             };
 
             base.OnStartup(e);
 
-            // Ensure protocol is registered on launch
             if (!ProtocolHandler.IsRegistered())
                 ProtocolHandler.Register();
 
@@ -48,8 +47,9 @@ namespace YTDLPHost
 
             if (!isFirstInstance)
             {
-                // Send the URL to the existing instance and shut down this one
                 var url = e.Args.FirstOrDefault() ?? "ytdlp://show";
+                
+                // 3. DEADLOCK FIX: Never use .Wait() on the UI thread. Use background tasks.
                 Task.Run(async () => 
                 {
                     await SingleInstanceManager.SendUrlToRunningInstanceAsync(url);
@@ -65,8 +65,8 @@ namespace YTDLPHost
             _mainWindow = new MainWindow { DataContext = _mainViewModel };
             _mainWindow.Closing += OnMainWindowClosing;
 
-            // NOTE: OnMainWindowStateChanged removed to allow standard Taskbar minimization.
-            // Only the custom minimize button in MainWindow.xaml now triggers the Tray-hide.
+            // REMOVED: OnMainWindowStateChanged so the standard Windows Minimize button 
+            // minimizes to the Taskbar normally. 
 
             _mainWindow.Show();
             _mainWindow.Activate();
@@ -95,19 +95,17 @@ namespace YTDLPHost
         {
             if (_mainWindow == null) return;
             _mainWindow.Show();
-            // Restore window if it was minimized to the taskbar
-            if (_mainWindow.WindowState == WindowState.Minimized) 
-                _mainWindow.WindowState = WindowState.Normal;
-            
+            if (_mainWindow.WindowState == WindowState.Minimized) _mainWindow.WindowState = WindowState.Normal;
             _mainWindow.Activate();
             _mainWindow.Topmost = true;
             _mainWindow.Topmost = false;
-            _mainViewModel!.IsWindowVisible = true;
+            
+            // Ensure ViewModel knows the window is visible
+            if (_mainViewModel != null) _mainViewModel.IsWindowVisible = true;
         }
 
         private void OnMainWindowClosing(object? sender, System.ComponentModel.CancelEventArgs e)
         {
-            // Intercept close button to hide to tray instead of exiting
             e.Cancel = true;
             _mainWindow?.Hide();
             _mainViewModel!.IsWindowVisible = false;
