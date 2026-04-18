@@ -1,12 +1,8 @@
 using System;
-using System.Diagnostics;
-using System.IO;
+using System.Drawing;
 using System.Reflection;
-using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Forms;
 using Microsoft.Toolkit.Uwp.Notifications;
-using Application = System.Windows.Application;
 
 namespace YTDLPHost.Services
 {
@@ -15,6 +11,7 @@ namespace YTDLPHost.Services
         private NotifyIcon? _notifyIcon;
         private bool _disposed;
 
+        // Events to communicate back to the MainViewModel/App
         public event EventHandler? ShowWindowRequested;
         public event EventHandler? ExitRequested;
 
@@ -22,133 +19,98 @@ namespace YTDLPHost.Services
         {
             if (_notifyIcon != null) return;
 
-            var icon = LoadApplicationIcon();
-
+            // Initialize the NotifyIcon with the application's embedded icon
             _notifyIcon = new NotifyIcon
             {
-                Icon = icon ?? System.Drawing.SystemIcons.Application,
-                Text = "YT Downloader Pro",
+                Icon = LoadApplicationIcon() ?? SystemIcons.Application,
+                Text = "YT Downloader Pro - Idle",
                 Visible = true
             };
 
-            var contextMenu = new System.Windows.Forms.ContextMenuStrip();
-            var showItem = new System.Windows.Forms.ToolStripMenuItem("Show Window");
+            [cite_start]// FIX: Restore the window immediately on a single Left-Click [cite: 1]
+            _notifyIcon.MouseClick += (s, e) =>
+            {
+                if (e.Button == MouseButtons.Left)
+                {
+                    ShowWindowRequested?.Invoke(this, EventArgs.Empty);
+                }
+            };
+
+            // Setup the Right-Click Context Menu
+            var contextMenu = new ContextMenuStrip();
+            
+            var showItem = new ToolStripMenuItem("Show Window");
             showItem.Click += (s, e) => ShowWindowRequested?.Invoke(this, EventArgs.Empty);
 
-            var exitItem = new System.Windows.Forms.ToolStripMenuItem("Exit");
+            var exitItem = new ToolStripMenuItem("Exit Application");
             exitItem.Click += (s, e) => ExitRequested?.Invoke(this, EventArgs.Empty);
 
             contextMenu.Items.Add(showItem);
-            contextMenu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+            contextMenu.Items.Add(new ToolStripSeparator());
             contextMenu.Items.Add(exitItem);
 
             _notifyIcon.ContextMenuStrip = contextMenu;
-            _notifyIcon.DoubleClick += (s, e) => ShowWindowRequested?.Invoke(this, EventArgs.Empty);
-
-            try
-            {
-                ToastNotificationManagerCompat.OnActivated += toastArgs =>
-                {
-                    Application.Current?.Dispatcher.BeginInvoke(() =>
-                    {
-                        ShowWindowRequested?.Invoke(this, EventArgs.Empty);
-                    });
-                };
-            }
-            catch { }
         }
 
-        private static System.Drawing.Icon? LoadApplicationIcon()
+        /// <summary>
+        /// Loads the icon.ico file from the project's embedded resources.
+        /// Ensure the icon's Build Action is set to "Embedded Resource".
+        /// </summary>
+        private Icon? LoadApplicationIcon()
         {
             try
             {
                 var assembly = Assembly.GetExecutingAssembly();
+                // Assumes the icon is at Assets/icon.ico in your project structure
                 using var stream = assembly.GetManifestResourceStream("YTDLPHost.Assets.icon.ico");
-                if (stream != null)
-                {
-                    return new System.Drawing.Icon(stream);
-                }
+                if (stream != null) return new Icon(stream);
             }
             catch { }
-
-            try
-            {
-                var exePath = Environment.ProcessPath;
-                var exeDir = !string.IsNullOrEmpty(exePath) ? Path.GetDirectoryName(exePath) : null;
-                if (!string.IsNullOrEmpty(exeDir))
-                {
-                    var iconPath = Path.Combine(exeDir, "Assets", "icon.ico");
-                    if (File.Exists(iconPath))
-                    {
-                        return new System.Drawing.Icon(iconPath);
-                    }
-                }
-            }
-            catch { }
-
-            try
-            {
-                var processPath = Environment.ProcessPath;
-                if (!string.IsNullOrEmpty(processPath) && File.Exists(processPath))
-                {
-                    return System.Drawing.Icon.ExtractAssociatedIcon(processPath);
-                }
-            }
-            catch { }
-
             return null;
         }
 
+        /// <summary>
+        /// Updates the hover text seen when mousing over the tray icon.
+        /// Windows limits this to 64 characters.
+        /// </summary>
         public void UpdateTooltip(string text)
         {
             if (_notifyIcon != null)
             {
-                _notifyIcon.Text = text.Length > 63 ? text.Substring(0, 63) : text;
+                // Safety truncation for Windows character limits
+                _notifyIcon.Text = text.Length > 63 ? text.Substring(0, 60) + "..." : text;
             }
         }
 
-        public void ShowBalloon(string title, string message, ToolTipIcon icon = ToolTipIcon.Info)
-        {
-            if (_notifyIcon == null) return;
-
-            try
-            {
-                new ToastContentBuilder()
-                    .AddText(title)
-                    .AddText(message)
-                    .AddAttributionText("YT Downloader Pro")
-                    .Show();
-            }
-            catch
-            {
-                _notifyIcon.BalloonTipTitle = title;
-                _notifyIcon.BalloonTipText = message;
-                _notifyIcon.BalloonTipIcon = icon;
-                _notifyIcon.ShowBalloonTip(3000);
-            }
-        }
-
+        /// <summary>
+        /// Sends a Windows Toast notification when a download finishes.
+        /// </summary>
         public void ShowDownloadCompleteNotification(string title, string fileName)
         {
             try
             {
+                [cite_start]// Attempting modern Windows 10/11 Toast [cite: 2]
                 new ToastContentBuilder()
                     .AddText("Download Complete")
-                    .AddText($"\"{fileName}\" finished downloading.")
+                    .AddText($"\"{fileName}\" has been saved.")
                     .AddAttributionText("YT Downloader Pro")
-                    .AddArgument("action", "show")
                     .Show();
             }
             catch
             {
-                ShowBalloon("Download Complete", $"\"{fileName}\" finished downloading.", ToolTipIcon.Info);
+                // Fallback to old-style Balloon Tip if Toast fails
+                if (_notifyIcon != null)
+                {
+                    _notifyIcon.BalloonTipTitle = "Download Complete";
+                    _notifyIcon.BalloonTipText = fileName;
+                    _notifyIcon.ShowBalloonTip(3000);
+                }
             }
         }
 
         public void SetVisible(bool visible)
         {
-            if (_notifyIcon != null)
-                _notifyIcon.Visible = visible;
+            if (_notifyIcon != null) _notifyIcon.Visible = visible;
         }
 
         public void Dispose()
@@ -156,14 +118,14 @@ namespace YTDLPHost.Services
             if (_disposed) return;
             _disposed = true;
 
-            try
-            {
-                ToastNotificationManagerCompat.History.Clear();
-            }
-            catch { }
+            // Clear any lingering toast history
+            try { ToastNotificationManagerCompat.History.Clear(); } catch { }
 
-            _notifyIcon?.Dispose();
-            _notifyIcon = null;
+            if (_notifyIcon != null)
+            {
+                _notifyIcon.Visible = false;
+                _notifyIcon.Dispose();
+            }
         }
     }
 }
