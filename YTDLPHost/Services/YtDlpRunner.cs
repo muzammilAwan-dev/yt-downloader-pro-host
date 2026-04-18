@@ -189,6 +189,17 @@ namespace YTDLPHost.Services
                 if (match.Success)
                 {
                     task.PlaylistInfo = $"Item {match.Groups[1].Value}/{match.Groups[2].Value}";
+                    
+                    // [FIX APPLIED] PLAYLIST STATE REBOOT
+                    // Resets the internal state machine so the next video starts totally fresh
+                    _extractionComplete = false; 
+                    task.Progress = 0.0;
+                    task.CurrentPhase = "Starting...";
+                    task.FileSize = "";
+                    task.Speed = "";
+                    task.Eta = "";
+                    task.Title = "Fetching Title..."; // Forces UI back to "YouTube Video..."
+                    
                     needsUiUpdate = true;
                 }
             }
@@ -214,14 +225,13 @@ namespace YTDLPHost.Services
                     needsUiUpdate = true;
                 }
 
-                // [FIX APPLIED] GHOST PHASE FIX: Switch from pre-download phases to main Video download and reset size
                 if (task.CurrentPhase == "Downloading Thumbnail..." || 
                     task.CurrentPhase == "Downloading Subtitles..." || 
                     task.CurrentPhase == "Extracting Info..." || 
                     task.CurrentPhase == "Starting...")
                 {
                     task.CurrentPhase = "Downloading Video...";
-                    task.FileSize = ""; // Reset size to capture real media size
+                    task.FileSize = ""; 
                     needsUiUpdate = true;
                 }
 
@@ -266,7 +276,6 @@ namespace YTDLPHost.Services
                     task.OutputPath = destMatch.Groups[1].Value.Trim();
                     string cleanTitle = Path.GetFileNameWithoutExtension(task.OutputPath);
                     
-                    // [FIX APPLIED] FORMAT TAG STRIPPING: Remove tags like .f251 or .en from UI
                     cleanTitle = Regex.Replace(cleanTitle, @"\.(f\w+|en-orig|en|vtt|webp|jpg)$", "", RegexOptions.IgnoreCase);
 
                     if (!string.IsNullOrEmpty(cleanTitle) && 
