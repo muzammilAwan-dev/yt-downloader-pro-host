@@ -19,12 +19,21 @@ namespace YTDLPHost.ViewModels
         private bool _isLogVisible;
 
         public Guid Id => Task.Id;
-        public string DisplayTitle => Task.Title == "Unknown" ? "YouTube Video..." : Task.Title;
+
+        /// <summary>
+        /// Gets the display title for the UI. Displays a clean placeholder while the actual title is being extracted.
+        /// </summary>
+        public string DisplayTitle => (Task.Title == "Unknown" || Task.Title.Contains("Fetching")) 
+            ? "YouTube Video..." 
+            : Task.Title;
+
         public string ResolutionDisplay => Task.Resolution;
         public double Progress => Task.Progress;
         public string ErrorMessage => Task.ErrorMessage;
 
-        // UPDATED: Now dynamically formats "45.5% of 63.31MiB"
+        /// <summary>
+        /// Dynamically constructs the status string based on the current download phase and progress metrics.
+        /// </summary>
         public string ProgressDisplay
         {
             get
