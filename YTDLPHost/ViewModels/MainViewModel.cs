@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
@@ -134,6 +135,37 @@ namespace YTDLPHost.ViewModels
             }
         }
 
+        // SECURITY SANDBOX: Validates the payload against zero-day attacks
+        private bool IsCommandSafe(string command)
+        {
+            // Threat 1: Command Injection
+            string[] forbiddenFlags = { "--exec", "--exec-before-download", "--postprocessor-args", "--setup-hook" };
+            foreach (var flag in forbiddenFlags)
+            {
+                if (command.Contains(flag, StringComparison.OrdinalIgnoreCase))
+                {
+                    System.Diagnostics.Debug.WriteLine($"SECURITY ALERT: Blocked command injection flag: {flag}");
+                    return false;
+                }
+            }
+
+            // Threat 2: Path Traversal (Directory escape)
+            var match = Regex.Match(command, @"-(?:o|P)\s+""([^""]+)""");
+            if (match.Success)
+            {
+                string path = match.Groups[1].Value;
+                if (path.Contains("..\\") || path.Contains("../") || 
+                    path.StartsWith(@"C:\Windows", StringComparison.OrdinalIgnoreCase) ||
+                    path.Contains(@"\Start Menu\Programs\Startup", StringComparison.OrdinalIgnoreCase))
+                {
+                    System.Diagnostics.Debug.WriteLine($"SECURITY ALERT: Blocked malicious path traversal: {path}");
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         public void ProcessUrl(string? url)
         {
             if (string.IsNullOrWhiteSpace(url)) return;
@@ -155,6 +187,14 @@ namespace YTDLPHost.ViewModels
 
                 var command = DecodeBase64(parts[0]);
                 if (string.IsNullOrWhiteSpace(command)) return;
+
+                // TRIGGER SECURITY VALIDATION
+                if (!IsCommandSafe(command))
+                {
+                    StatusText = "Security Error: Blocked potentially malicious payload.";
+                    System.Windows.MessageBox.Show("A potentially unsafe download command was blocked for your security.", "YT Downloader Pro - Security Alert", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
 
                 string? cookieContent = null;
                 string? cookieFilePath = null;
@@ -357,13 +397,11 @@ namespace YTDLPHost.ViewModels
             UpdateActiveCount();
         }
 
-        // FIXED: Bulletproof 3-step fallback logic for the Folder Icon
         private static void OpenFolder(DownloadItemViewModel? vm)
         {
             if (vm?.Task == null) return;
             var path = vm.Task.OutputPath;
 
-            // 1. First attempt: Highlight the exact downloaded file
             if (!string.IsNullOrEmpty(path) && File.Exists(path))
             {
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
@@ -375,7 +413,6 @@ namespace YTDLPHost.ViewModels
                 return;
             }
 
-            // 2. Second attempt: Open the folder where the file was supposed to be
             if (!string.IsNullOrEmpty(path))
             {
                 var dir = Path.GetDirectoryName(path);
@@ -390,7 +427,6 @@ namespace YTDLPHost.ViewModels
                 }
             }
 
-            // 3. Absolute Fallback: Open the base save directory derived from the original command
             var saveDir = ExtractSaveDirectory(vm.Task.Command);
             if (Directory.Exists(saveDir))
             {
@@ -402,13 +438,11 @@ namespace YTDLPHost.ViewModels
             }
         }
 
-        // FIXED: Bulletproof 2-step fallback logic for the Play Icon
         private static void PlayFile(DownloadItemViewModel? vm)
         {
             if (vm?.Task == null) return;
             var path = vm.Task.OutputPath;
             
-            // 1. Try to play the exact file
             if (!string.IsNullOrEmpty(path) && File.Exists(path))
             {
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
@@ -419,7 +453,6 @@ namespace YTDLPHost.ViewModels
                 return;
             }
 
-            // 2. Fallback: If the exact file is missing, open the folder instead
             OpenFolder(vm);
         }
 
@@ -457,16 +490,16 @@ namespace YTDLPHost.ViewModels
         private static string ExtractResolution(string command)
         {
             if (command.Contains("ba") && (command.Contains("extract-audio") || command.Contains("audio"))) return "Audio";
-            var match = System.Text.RegularExpressions.Regex.Match(command, @"height<=?(\d+)");
+            var match = Regex.Match(command, @"height<=?(\d+)");
             if (match.Success) return match.Groups[1].Value + "p";
-            match = System.Text.RegularExpressions.Regex.Match(command, @"(\d+)p");
+            match = Regex.Match(command, @"(\d+)p");
             if (match.Success) return match.Groups[1].Value + "p";
             return "";
         }
 
         private static string ExtractTitleHint(string command)
         {
-            var match = System.Text.RegularExpressions.Regex.Match(command, @"-o\s+""([^""]+)""");
+            var match = Regex.Match(command, @"-o\s+""([^""]+)""");
             if (match.Success)
             {
                 return Path.GetFileNameWithoutExtension(match.Groups[1].Value)
@@ -477,7 +510,7 @@ namespace YTDLPHost.ViewModels
 
         private static string ExtractSaveDirectory(string command)
         {
-            var match = System.Text.RegularExpressions.Regex.Match(command, @"-o\s+""([^""]+)""");
+            var match = Regex.Match(command, @"-o\s+""([^""]+)""");
             if (match.Success)
             {
                 var template = match.Groups[1].Value;
