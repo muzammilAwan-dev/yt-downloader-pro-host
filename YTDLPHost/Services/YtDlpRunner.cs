@@ -15,7 +15,6 @@ namespace YTDLPHost.Services
         private Process? _process;
         private readonly CancellationTokenSource _cts = new();
         private readonly StringBuilder _errorBuffer = new();
-        private bool _downloadStarted;
         private bool _extractionComplete;
         private bool _disposed;
 
@@ -31,11 +30,11 @@ namespace YTDLPHost.Services
         public async Task ExecuteAsync(DownloadTask task)
         {
             _errorBuffer.Clear();
-            _downloadStarted = false;
             _extractionComplete = false;
             task.ClearLog();
+            task.CurrentPhase = "Starting...";
+            task.IsIndeterminate = true;
 
-            // FIXED: Bulletproof Regex to strip redundant "yt-dlp" text from the payload
             var command = task.Command.Trim();
             command = Regex.Replace(command, @"^(?:yt-dlp\.exe|yt-dlp)\s+", "", RegexOptions.IgnoreCase);
 
@@ -48,10 +47,7 @@ namespace YTDLPHost.Services
                 var saveDirectory = ExtractSaveDirectory(command);
 
                 if (!string.IsNullOrEmpty(task.CookieFilePath) && File.Exists(task.CookieFilePath))
-                {
                     command += $" --cookies \"{task.CookieFilePath}\"";
-                    task.AppendLog($"[DEBUG] Injection: Cookies appended from {task.CookieFilePath}");
-                }
 
                 var psi = new ProcessStartInfo
                 {
@@ -85,6 +81,8 @@ namespace YTDLPHost.Services
                 {
                     task.Status = DownloadStatus.Completed;
                     task.Progress = 100.0;
+                    task.IsIndeterminate = false;
+                    task.CurrentPhase = "Complete";
                     task.CompletedAt = DateTime.Now;
                     task.Speed = "";
                     task.Eta = "Done";
@@ -101,6 +99,7 @@ namespace YTDLPHost.Services
                         .TakeLast(3));
 
                     task.Status = DownloadStatus.Error;
+                    task.IsIndeterminate = false;
                     task.ErrorMessage = string.IsNullOrWhiteSpace(lastErrors)
                         ? $"Download failed (Code: {_process.ExitCode}). Check full logs for details."
                         : lastErrors;
@@ -116,6 +115,7 @@ namespace YTDLPHost.Services
             {
                 if (_disposed) return;
                 task.Status = DownloadStatus.Error;
+                task.IsIndeterminate = false;
                 task.ErrorMessage = $"Execution error: {ex.Message}";
                 task.AppendLog($"[DEBUG] Critical Exception: {ex.Message}");
                 OnDownloadError?.Invoke(this, new DownloadErrorEventArgs(task.Id, task.ErrorMessage));
@@ -133,13 +133,25 @@ namespace YTDLPHost.Services
             if (string.IsNullOrWhiteSpace(data)) return;
 
             task.AppendLog(data);
-
             bool needsUiUpdate = false;
             double oldProgress = task.Progress;
 
+            // 1. Playlist Item Tracking
+            if (data.Contains("[download] Downloading item"))
+            {
+                var match = Regex.Match(data, @"Downloading item (\d+) of (\d+)");
+                if (match.Success)
+                {
+                    task.PlaylistInfo = $"Item {match.Groups[1].Value}/{match.Groups[2].Value}";
+                    needsUiUpdate = true;
+                }
+            }
+
+            // 2. Info Extraction Phase
             if (!_extractionComplete && (data.Contains("[youtube]") || data.Contains("[info]")))
             {
                 _extractionComplete = true;
+                task.CurrentPhase = "Extracting Info...";
                 if (task.Status != DownloadStatus.Downloading)
                 {
                     task.Status = DownloadStatus.Downloading;
@@ -147,9 +159,11 @@ namespace YTDLPHost.Services
                 }
             }
 
-            if (data.Contains("[download]"))
+            // 3. Regular Downloading Phase
+            if (data.Contains("[download]") && data.Contains("%"))
             {
-                _downloadStarted = true;
+                task.IsIndeterminate = false; // Turn off animation since we have numbers
+                
                 if (task.Status != DownloadStatus.Downloading)
                 {
                     task.Status = DownloadStatus.Downloading;
@@ -160,11 +174,27 @@ namespace YTDLPHost.Services
                 if (percentMatch.Success)
                 {
                     if (double.TryParse(percentMatch.Groups[1].Value, out var percent))
-                        task.Progress = Math.Min(percent, 100.0);
+                    {
+                        percent = Math.Min(percent, 100.0);
+                        
+                        // Detect when 100% video stream resets to 0% for audio stream
+                        if (percent < task.Progress && task.Progress >= 99.0)
+                        {
+                            task.CurrentPhase = "Downloading Audio...";
+                        }
+                        else if (task.CurrentPhase == "Extracting Info..." || task.CurrentPhase == "Starting...")
+                        {
+                            task.CurrentPhase = "Downloading Video...";
+                        }
+                        
+                        task.Progress = percent;
+                    }
                     else if (data.Contains("100%"))
+                    {
                         task.Progress = 100.0;
+                    }
                     
-                    if (task.Progress > oldProgress) needsUiUpdate = true;
+                    if (task.Progress != oldProgress) needsUiUpdate = true;
                 }
 
                 var speedMatch = Regex.Match(data, @"at\s+([\d\.]+[KMG]iB/s)");
@@ -174,7 +204,8 @@ namespace YTDLPHost.Services
                 if (etaMatch.Success) { task.Eta = etaMatch.Groups[1].Value; needsUiUpdate = true; }
             }
 
-            if (data.Contains("Destination:", StringComparison.OrdinalIgnoreCase))
+            // 4. Record Standard Destination
+            if (data.Contains("Destination:", StringComparison.OrdinalIgnoreCase) && !data.Contains("[Merger]") && !data.Contains("[ExtractAudio]"))
             {
                 var destMatch = Regex.Match(data, @"Destination:\s+(.+)");
                 if (destMatch.Success)
@@ -188,16 +219,25 @@ namespace YTDLPHost.Services
                 }
             }
 
-            if ((data.Contains("[Merger]") || data.Contains("[ExtractAudio]") || data.Contains("[MoveFiles]")) 
-                && data.Contains("Destination:"))
+            // 5. Detect FFmpeg Merging Phase
+            if (data.Contains("[Merger]") || data.Contains("[ExtractAudio]") || data.Contains("[MoveFiles]") || data.Contains("Fixing MPEG-TS"))
             {
-                var destMatch = Regex.Match(data, @"Destination:\s+(.+)");
-                if (destMatch.Success)
+                task.CurrentPhase = "Merging & Finalizing...";
+                task.IsIndeterminate = true;
+                task.Speed = "";
+                task.Eta = "";
+                needsUiUpdate = true;
+
+                if (data.Contains("Destination:"))
                 {
-                    task.OutputPath = destMatch.Groups[1].Value.Trim();
-                    string tempFileName = Path.GetFileName(task.OutputPath);
-                    if (!string.IsNullOrEmpty(tempFileName) && task.Title == "Unknown")
-                        task.Title = tempFileName;
+                    var destMatch = Regex.Match(data, @"Destination:\s+(.+)");
+                    if (destMatch.Success)
+                    {
+                        task.OutputPath = destMatch.Groups[1].Value.Trim();
+                        string tempFileName = Path.GetFileName(task.OutputPath);
+                        if (!string.IsNullOrEmpty(tempFileName) && task.Title == "Unknown")
+                            task.Title = tempFileName;
+                    }
                 }
             }
 
@@ -253,7 +293,6 @@ namespace YTDLPHost.Services
             string saveDir = Path.GetDirectoryName(task.OutputPath) ?? "";
             if (string.IsNullOrEmpty(saveDir)) return;
 
-            // FIXED: Create an isolated log folder to keep user directories clean
             string logDir = Path.Combine(saveDir, "YTDLP-Video-logs");
             if (!Directory.Exists(logDir))
             {
