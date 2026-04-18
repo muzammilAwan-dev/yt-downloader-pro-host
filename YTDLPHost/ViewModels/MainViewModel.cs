@@ -307,11 +307,8 @@ namespace YTDLPHost.ViewModels
             {
                 if (vm.Task.Status == DownloadStatus.Completed && _downloads.Contains(vm))
                 {
+                    CleanupCookieFile(vm.Task);
                     _downloads.Remove(vm);
-                    if (!string.IsNullOrEmpty(vm.Task.CookieFilePath) && File.Exists(vm.Task.CookieFilePath))
-                    {
-                        try { File.Delete(vm.Task.CookieFilePath); } catch { }
-                    }
                 }
             });
         }
@@ -406,10 +403,14 @@ namespace YTDLPHost.ViewModels
 
         private static void CleanupCookieFile(DownloadTask task)
         {
+            // Remove the temporary cookie bypass file
             if (!string.IsNullOrEmpty(task.CookieFilePath) && File.Exists(task.CookieFilePath))
             {
                 try { File.Delete(task.CookieFilePath); } catch { }
             }
+            
+            // Note: We intentionally do NOT delete the merged .log file from disk 
+            // when removing the item from the list, so the user still has it in their video folder.
         }
 
         private void UpdateActiveCount()
