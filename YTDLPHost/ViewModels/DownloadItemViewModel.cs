@@ -24,6 +24,7 @@ namespace YTDLPHost.ViewModels
         public double Progress => Task.Progress;
         public string ErrorMessage => Task.ErrorMessage;
 
+        // UPDATED: Now dynamically formats "45.5% of 63.31MiB"
         public string ProgressDisplay
         {
             get
@@ -40,11 +41,13 @@ namespace YTDLPHost.ViewModels
 
                 if (Task.IsIndeterminate) return prefix;
                 
-                string speedEta = "";
-                if (!string.IsNullOrEmpty(Task.Speed)) speedEta += $" | {Task.Speed}";
-                if (!string.IsNullOrEmpty(Task.Eta) && Task.Eta != "Unknown") speedEta += $" | ETA: {Task.Eta}";
+                string sizeStr = string.IsNullOrEmpty(Task.FileSize) ? "" : $" of {Task.FileSize}";
+                string details = $" | {Task.Progress:0.0}%{sizeStr}";
                 
-                return $"{prefix}{speedEta}";
+                if (!string.IsNullOrEmpty(Task.Speed)) details += $" | {Task.Speed}";
+                if (!string.IsNullOrEmpty(Task.Eta) && Task.Eta != "Unknown") details += $" | ETA: {Task.Eta}";
+                
+                return $"{prefix}{details}";
             }
         }
 
@@ -62,7 +65,6 @@ namespace YTDLPHost.ViewModels
         {
             Task = task;
             
-            // This listener automatically catches background changes and forwards them cleanly to WPF
             Task.PropertyChanged += (s, e) =>
             {
                 if (e.PropertyName == nameof(Task.Status))
@@ -71,6 +73,7 @@ namespace YTDLPHost.ViewModels
                 }
                 else if (e.PropertyName == nameof(Task.Speed) || 
                          e.PropertyName == nameof(Task.Eta) || 
+                         e.PropertyName == nameof(Task.FileSize) || 
                          e.PropertyName == nameof(Task.CurrentPhase) || 
                          e.PropertyName == nameof(Task.PlaylistInfo) || 
                          e.PropertyName == nameof(Task.IsIndeterminate))
@@ -98,7 +101,6 @@ namespace YTDLPHost.ViewModels
             ToggleLogCommand = new RelayCommand(() => IsLogVisible = !IsLogVisible);
         }
 
-        // RENDER OPTIMIZATION: Only notify the specific states instead of using string.Empty (Shotgun)
         public void Refresh()
         {
             RefreshStateProperties();
