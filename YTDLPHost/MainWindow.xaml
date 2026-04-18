@@ -105,17 +105,26 @@
                             <Button Style="{StaticResource IconButtonStyle}"
                                     Command="{Binding DataContext.PlayFileCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
                                     CommandParameter="{Binding}"
-                                    ToolTip="Play"
+                                    ToolTip="Play Video"
                                     Visibility="{Binding IsCompleted, Converter={StaticResource BoolToVisibilityConverter}}"
                                     Margin="0,0,4,0">
                                 <Path Data="M8,5.14V19.14L19,12.14L8,5.14Z" 
                                       Fill="{StaticResource TextSecondaryBrush}" Width="16" Height="16" Stretch="Uniform"/>
                             </Button>
+
+                            <Button Style="{StaticResource IconButtonStyle}"
+                                    Command="{Binding DataContext.ResumeDownloadCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                    CommandParameter="{Binding}"
+                                    ToolTip="Resume Download"
+                                    Visibility="{Binding IsResumable, Converter={StaticResource BoolToVisibilityConverter}}">
+                                <Path Data="M8,5.14V19.14L19,12.14L8,5.14Z" 
+                                      Fill="{StaticResource SuccessBrush}" Width="16" Height="16" Stretch="Uniform"/>
+                            </Button>
                             
                             <Button Style="{StaticResource IconButtonStyle}"
                                     Command="{Binding DataContext.RemoveDownloadCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
                                     CommandParameter="{Binding}"
-                                    ToolTip="Remove"
+                                    ToolTip="Remove from List"
                                     Visibility="{Binding Task.Status, Converter={StaticResource CanRemoveConverter}}">
                                 <Path Data="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z" 
                                       Fill="{StaticResource TextMutedBrush}" Width="16" Height="16" Stretch="Uniform"/>
@@ -124,10 +133,10 @@
                             <Button Style="{StaticResource IconButtonStyle}"
                                     Command="{Binding DataContext.CancelDownloadCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
                                     CommandParameter="{Binding}"
-                                    ToolTip="Cancel"
+                                    ToolTip="Pause/Stop"
                                     Visibility="{Binding IsCancellable, Converter={StaticResource BoolToVisibilityConverter}}">
-                                <Path Data="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z" 
-                                      Fill="{StaticResource ErrorBrush}" Width="16" Height="16" Stretch="Uniform"/>
+                                <Path Data="M14,19H18V5H14M6,19H10V5H6V19Z" 
+                                      Fill="{StaticResource WarningBrush}" Width="16" Height="16" Stretch="Uniform"/>
                             </Button>
                         </StackPanel>
                     </Grid>
