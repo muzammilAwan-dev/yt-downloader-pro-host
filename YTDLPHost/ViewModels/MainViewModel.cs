@@ -135,10 +135,8 @@ namespace YTDLPHost.ViewModels
             }
         }
 
-        // SECURITY SANDBOX: Validates the payload against zero-day attacks
         private bool IsCommandSafe(string command)
         {
-            // Threat 1: Command Injection
             string[] forbiddenFlags = { "--exec", "--exec-before-download", "--postprocessor-args", "--setup-hook" };
             foreach (var flag in forbiddenFlags)
             {
@@ -149,7 +147,6 @@ namespace YTDLPHost.ViewModels
                 }
             }
 
-            // Threat 2: Path Traversal (Directory escape)
             var match = Regex.Match(command, @"-(?:o|P)\s+""([^""]+)""");
             if (match.Success)
             {
@@ -188,7 +185,6 @@ namespace YTDLPHost.ViewModels
                 var command = DecodeBase64(parts[0]);
                 if (string.IsNullOrWhiteSpace(command)) return;
 
-                // TRIGGER SECURITY VALIDATION
                 if (!IsCommandSafe(command))
                 {
                     StatusText = "Security Error: Blocked potentially malicious payload.";
@@ -259,6 +255,10 @@ namespace YTDLPHost.ViewModels
                     UpdateActiveCount();
 
                     _ = StartDownloadTaskAsync(next);
+
+                    // CONCURRENCY FIX: Stagger the start of each parallel task by 1.5 seconds.
+                    // This prevents third-party tools like deno.exe from colliding and crashing.
+                    await Task.Delay(1500); 
                 }
 
                 if (_activeRunners.Count == 0 && _downloads.Count(d => d.Task.Status == DownloadStatus.Queued) == 0)
