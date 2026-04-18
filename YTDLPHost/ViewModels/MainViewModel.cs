@@ -46,6 +46,7 @@ namespace YTDLPHost.ViewModels
 
         public IRelayCommand<string> ProcessUrlCommand { get; }
         public IRelayCommand<DownloadItemViewModel> CancelDownloadCommand { get; }
+        public IRelayCommand<DownloadItemViewModel> ResumeDownloadCommand { get; } // NEW
         public IRelayCommand<DownloadItemViewModel> RemoveDownloadCommand { get; }
         public IRelayCommand<DownloadItemViewModel> OpenFolderCommand { get; }
         public IRelayCommand<DownloadItemViewModel> PlayFileCommand { get; }
@@ -65,10 +66,12 @@ namespace YTDLPHost.ViewModels
             _trayService.Initialize();
 
             ProcessUrlCommand = new RelayCommand<string>(ProcessUrl);
-            CancelDownloadCommand = new RelayCommand<DownloadItemViewModel>(CancelDownload, CanCancel);
-            RemoveDownloadCommand = new RelayCommand<DownloadItemViewModel>(RemoveDownload, CanRemove);
-            OpenFolderCommand = new RelayCommand<DownloadItemViewModel>(OpenFolder, _ => true);
-            PlayFileCommand = new RelayCommand<DownloadItemViewModel>(PlayFile, _ => true);
+            CancelDownloadCommand = new RelayCommand<DownloadItemViewModel>(CancelDownload);
+            ResumeDownloadCommand = new RelayCommand<DownloadItemViewModel>(ResumeDownload); // NEW
+            RemoveDownloadCommand = new RelayCommand<DownloadItemViewModel>(RemoveDownload);
+            OpenFolderCommand = new RelayCommand<DownloadItemViewModel>(OpenFolder);
+            PlayFileCommand = new RelayCommand<DownloadItemViewModel>(PlayFile);
+            
             ClearCompletedCommand = new RelayCommand(ClearCompleted);
             ShowWindowCommand = new RelayCommand(() => RequestShowWindow?.Invoke(this, EventArgs.Empty));
             ExitCommand = new RelayCommand(ExitApplication);
@@ -272,8 +275,6 @@ namespace YTDLPHost.ViewModels
                     UpdateActiveCount();
 
                     _trayService.ShowDownloadCompleteNotification("Download Complete", e.Title);
-
-                    _ = DelayedRemoveAsync(vm);
                 });
             }
         }
@@ -300,19 +301,6 @@ namespace YTDLPHost.ViewModels
             }
         }
 
-        private async Task DelayedRemoveAsync(DownloadItemViewModel vm)
-        {
-            await Task.Delay(TimeSpan.FromMinutes(5));
-            System.Windows.Application.Current?.Dispatcher.BeginInvoke(() =>
-            {
-                if (vm.Task.Status == DownloadStatus.Completed && _downloads.Contains(vm))
-                {
-                    CleanupCookieFile(vm.Task);
-                    _downloads.Remove(vm);
-                }
-            });
-        }
-
         private void CancelDownload(DownloadItemViewModel? vm)
         {
             if (vm == null) return;
@@ -325,8 +313,20 @@ namespace YTDLPHost.ViewModels
             vm.Task.Status = DownloadStatus.Cancelled;
             vm.Refresh();
             UpdateActiveCount();
+        }
 
-            CleanupCookieFile(vm.Task);
+        // NEW: Resumes a paused/cancelled download by setting it back to Queued
+        private void ResumeDownload(DownloadItemViewModel? vm)
+        {
+            if (vm == null) return;
+
+            vm.Task.Status = DownloadStatus.Queued;
+            vm.Task.ErrorMessage = "";
+            vm.Refresh();
+            UpdateActiveCount();
+            
+            // Kickstart the queue loop again if it was idle
+            _ = ProcessQueueAsync();
         }
 
         private void RemoveDownload(DownloadItemViewModel? vm)
@@ -403,14 +403,10 @@ namespace YTDLPHost.ViewModels
 
         private static void CleanupCookieFile(DownloadTask task)
         {
-            // Remove the temporary cookie bypass file
             if (!string.IsNullOrEmpty(task.CookieFilePath) && File.Exists(task.CookieFilePath))
             {
                 try { File.Delete(task.CookieFilePath); } catch { }
             }
-            
-            // Note: We intentionally do NOT delete the merged .log file from disk 
-            // when removing the item from the list, so the user still has it in their video folder.
         }
 
         private void UpdateActiveCount()
@@ -419,13 +415,6 @@ namespace YTDLPHost.ViewModels
             _trayService.UpdateTooltip(ActiveDownloadCount == 0
                 ? "YT Downloader Pro - Idle"
                 : $"YT Downloader Pro - {ActiveDownloadCount} active");
-        }
-
-        private static bool CanCancel(DownloadItemViewModel? vm) => vm?.IsCancellable ?? false;
-        private static bool CanRemove(DownloadItemViewModel? vm)
-        {
-            if (vm == null) return false;
-            return vm.Task.Status == DownloadStatus.Completed || vm.Task.Status == DownloadStatus.Error || vm.Task.Status == DownloadStatus.Cancelled;
         }
 
         private static string DecodeBase64(string input)
