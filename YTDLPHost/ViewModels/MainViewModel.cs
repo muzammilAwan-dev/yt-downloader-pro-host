@@ -518,9 +518,9 @@ namespace YTDLPHost.ViewModels
             if (match.Success)
             {
                 return Path.GetFileNameWithoutExtension(match.Groups[1].Value)
-                    .Replace("%(title)s", "YouTube Video").Replace("%(uploader)s", "Channel");
+                    .Replace("%(title)s", "Fetching Title...").Replace("%(uploader)s", "Channel");
             }
-            return "YouTube Video";
+            return "Fetching Title...";
         }
 
         private static string ExtractSaveDirectory(string command)
