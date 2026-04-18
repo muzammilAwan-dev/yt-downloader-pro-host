@@ -256,8 +256,6 @@ namespace YTDLPHost.ViewModels
 
                     _ = StartDownloadTaskAsync(next);
 
-                    // CONCURRENCY FIX: Stagger the start of each parallel task by 1.5 seconds.
-                    // This prevents third-party tools like deno.exe from colliding and crashing.
                     await Task.Delay(1500); 
                 }
 
@@ -308,6 +306,8 @@ namespace YTDLPHost.ViewModels
                     HasCompletedDownloads = true;
                     UpdateActiveCount();
                     _trayService.ShowDownloadCompleteNotification("Download Complete", e.Title);
+                    
+                    Task.Run(() => CleanupPartialFiles(vm.Task));
                 });
             }
         }
@@ -347,31 +347,46 @@ namespace YTDLPHost.ViewModels
             vm.Refresh();
             UpdateActiveCount();
 
-            Task.Run(() => CleanupPartialFiles(vm.Task));
+            Task.Run(() => CleanupPartialFiles(vm.Task, forceDeleteAll: true));
             CleanupCookieFile(vm.Task);
         }
 
-        private void CleanupPartialFiles(DownloadTask task)
+        private void CleanupPartialFiles(DownloadTask task, bool forceDeleteAll = false)
         {
-            if (string.IsNullOrEmpty(task.OutputPath)) return;
-            try
+            foreach (var filePath in task.TrackedFiles.ToList())
             {
-                string dir = Path.GetDirectoryName(task.OutputPath) ?? "";
-                string title = Path.GetFileNameWithoutExtension(task.OutputPath);
-
-                if (Directory.Exists(dir) && !string.IsNullOrEmpty(title))
+                if (!forceDeleteAll && filePath.Equals(task.OutputPath, StringComparison.OrdinalIgnoreCase))
                 {
-                    var files = Directory.GetFiles(dir, $"{title}*");
-                    foreach (var file in files)
+                    continue;
+                }
+
+                if (File.Exists(filePath))
+                {
+                    try { File.Delete(filePath); } catch { }
+                }
+            }
+
+            if (forceDeleteAll && !string.IsNullOrEmpty(task.OutputPath))
+            {
+                try
+                {
+                    string dir = Path.GetDirectoryName(task.OutputPath) ?? "";
+                    string title = Path.GetFileNameWithoutExtension(task.OutputPath);
+
+                    if (Directory.Exists(dir) && !string.IsNullOrEmpty(title))
                     {
-                        if (file.EndsWith(".part") || file.EndsWith(".ytdl") || file.EndsWith(".frag"))
+                        var files = Directory.GetFiles(dir, $"{title}*");
+                        foreach (var file in files)
                         {
-                            File.Delete(file);
+                            if (file.EndsWith(".part") || file.EndsWith(".ytdl") || file.EndsWith(".frag"))
+                            {
+                                File.Delete(file);
+                            }
                         }
                     }
                 }
+                catch { }
             }
-            catch { }
         }
 
         private void ResumeDownload(DownloadItemViewModel? vm)
