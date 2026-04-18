@@ -196,7 +196,7 @@
                             Padding="8"
                             Visibility="{Binding IsLogVisible, Converter={StaticResource BoolToVisibilityConverter}}">
                         <ScrollViewer Height="150" VerticalScrollBarVisibility="Auto">
-                            <TextBox Text="{Binding Task.FullLogText, Mode=OneWay}"
+                            <TextBox Text="{Binding Task.UiLogText, Mode=OneWay}"
                                      Background="Transparent"
                                      Foreground="{StaticResource TextSecondaryBrush}"
                                      BorderThickness="0"
