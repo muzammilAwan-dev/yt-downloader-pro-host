@@ -24,7 +24,6 @@ namespace YTDLPHost.ViewModels
         public double Progress => Task.Progress;
         public string ErrorMessage => Task.ErrorMessage;
 
-        // FIXED: Dynamically builds the text based on Playlist, Phase, and Status
         public string ProgressDisplay
         {
             get
@@ -39,7 +38,7 @@ namespace YTDLPHost.ViewModels
                     ? Task.CurrentPhase 
                     : $"{Task.PlaylistInfo} - {Task.CurrentPhase}";
 
-                if (Task.IsIndeterminate) return prefix; // Merging doesn't have Speed/ETA
+                if (Task.IsIndeterminate) return prefix;
                 
                 string speedEta = "";
                 if (!string.IsNullOrEmpty(Task.Speed)) speedEta += $" | {Task.Speed}";
@@ -63,18 +62,12 @@ namespace YTDLPHost.ViewModels
         {
             Task = task;
             
+            // This listener automatically catches background changes and forwards them cleanly to WPF
             Task.PropertyChanged += (s, e) =>
             {
                 if (e.PropertyName == nameof(Task.Status))
                 {
-                    OnPropertyChanged(nameof(IsCompleted));
-                    OnPropertyChanged(nameof(IsActive));
-                    OnPropertyChanged(nameof(HasError));
-                    OnPropertyChanged(nameof(IsResumable));
-                    OnPropertyChanged(nameof(CanBePaused));
-                    OnPropertyChanged(nameof(CanBeCancelled));
-                    OnPropertyChanged(nameof(CanBeRemoved));
-                    OnPropertyChanged(nameof(ProgressDisplay));
+                    RefreshStateProperties();
                 }
                 else if (e.PropertyName == nameof(Task.Speed) || 
                          e.PropertyName == nameof(Task.Eta) || 
@@ -105,9 +98,22 @@ namespace YTDLPHost.ViewModels
             ToggleLogCommand = new RelayCommand(() => IsLogVisible = !IsLogVisible);
         }
 
+        // RENDER OPTIMIZATION: Only notify the specific states instead of using string.Empty (Shotgun)
         public void Refresh()
         {
-            OnPropertyChanged(string.Empty);
+            RefreshStateProperties();
+        }
+
+        private void RefreshStateProperties()
+        {
+            OnPropertyChanged(nameof(IsCompleted));
+            OnPropertyChanged(nameof(IsActive));
+            OnPropertyChanged(nameof(HasError));
+            OnPropertyChanged(nameof(IsResumable));
+            OnPropertyChanged(nameof(CanBePaused));
+            OnPropertyChanged(nameof(CanBeCancelled));
+            OnPropertyChanged(nameof(CanBeRemoved));
+            OnPropertyChanged(nameof(ProgressDisplay));
         }
     }
 }
