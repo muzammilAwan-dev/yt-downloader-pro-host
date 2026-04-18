@@ -12,15 +12,16 @@ namespace YTDLPHost.Services
 {
     public class YtDlpRunner : IDisposable
     {
-        // CPU OPTIMIZATION: Compiled Regexes initialize once and run instantaneously
         private static readonly Regex CmdTrimRegex = new(@"^(?:yt-dlp\.exe|yt-dlp)\s+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex PercentRegex = new(@"\[download\]\s+(?:(\d+\.?\d*)%|100%)", RegexOptions.Compiled);
         private static readonly Regex SpeedRegex = new(@"at\s+([\d\.]+[KMG]iB/s)", RegexOptions.Compiled);
         private static readonly Regex EtaRegex = new(@"ETA\s+([\d:]+)", RegexOptions.Compiled);
-        private static readonly Regex DestRegex = new(@"Destination:\s+(.+)", RegexOptions.Compiled);
+        private static readonly Regex SizeRegex = new(@"of\s+([\d\.]+[KMG]iB)", RegexOptions.Compiled);
         private static readonly Regex PlaylistRegex = new(@"Downloading item (\d+) of (\d+)", RegexOptions.Compiled);
         private static readonly Regex OutputTemplateRegex = new(@"-o\s+""([^""]+)""", RegexOptions.Compiled);
         private static readonly Regex PathTemplateRegex = new(@"-P\s+""([^""]+)""", RegexOptions.Compiled);
+        
+        private static readonly Regex FileTrackerRegex = new(@"(?:Destination:|Writing video \w+ to:|Writing video \w+ \d+ to:)\s+(.+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         private Process? _process;
         private readonly CancellationTokenSource _cts = new();
@@ -95,7 +96,7 @@ namespace YTDLPHost.Services
                     task.CurrentPhase = "Complete";
                     task.CompletedAt = DateTime.Now;
                     task.Speed = "";
-                    task.Eta = "Done";
+                    task.Eta = "";
                     task.AppendLog("");
                     task.AppendLog("=== Download Finished Successfully ===");
 
@@ -146,6 +147,42 @@ namespace YTDLPHost.Services
             bool needsUiUpdate = false;
             double oldProgress = task.Progress;
 
+            var fileTrackMatch = FileTrackerRegex.Match(data);
+            if (fileTrackMatch.Success)
+            {
+                string path = fileTrackMatch.Groups[1].Value.Trim();
+                if (!string.IsNullOrWhiteSpace(path))
+                {
+                    task.TrackedFiles.Add(path);
+                }
+            }
+
+            if (data.Contains("Writing video subtitles", StringComparison.OrdinalIgnoreCase))
+            {
+                task.CurrentPhase = "Downloading Subtitles...";
+                task.IsIndeterminate = true;
+                needsUiUpdate = true;
+            }
+            else if (data.Contains("Downloading video thumbnail", StringComparison.OrdinalIgnoreCase) || 
+                     data.Contains("Writing video thumbnail", StringComparison.OrdinalIgnoreCase))
+            {
+                task.CurrentPhase = "Downloading Thumbnail...";
+                task.IsIndeterminate = true;
+                needsUiUpdate = true;
+            }
+            else if (data.Contains("[SponsorBlock]", StringComparison.OrdinalIgnoreCase))
+            {
+                task.CurrentPhase = "Removing Sponsors...";
+                task.IsIndeterminate = true;
+                needsUiUpdate = true;
+            }
+            else if (data.Contains("[ExtractAudio]", StringComparison.OrdinalIgnoreCase))
+            {
+                task.CurrentPhase = "Converting Audio...";
+                task.IsIndeterminate = true;
+                needsUiUpdate = true;
+            }
+
             if (data.Contains("[download] Downloading item"))
             {
                 var match = PlaylistRegex.Match(data);
@@ -177,6 +214,13 @@ namespace YTDLPHost.Services
                     needsUiUpdate = true;
                 }
 
+                var sizeMatch = SizeRegex.Match(data);
+                if (sizeMatch.Success && string.IsNullOrEmpty(task.FileSize)) 
+                { 
+                    task.FileSize = sizeMatch.Groups[1].Value; 
+                    needsUiUpdate = true; 
+                }
+
                 var percentMatch = PercentRegex.Match(data);
                 if (percentMatch.Success)
                 {
@@ -184,9 +228,14 @@ namespace YTDLPHost.Services
                     {
                         percent = Math.Min(percent, 100.0);
                         if (percent < task.Progress && task.Progress >= 99.0)
+                        {
                             task.CurrentPhase = "Downloading Audio...";
+                            task.FileSize = ""; 
+                        }
                         else if (task.CurrentPhase == "Extracting Info..." || task.CurrentPhase == "Starting...")
+                        {
                             task.CurrentPhase = "Downloading Video...";
+                        }
                         
                         task.Progress = percent;
                     }
@@ -204,7 +253,7 @@ namespace YTDLPHost.Services
 
             if (data.Contains("Destination:", StringComparison.OrdinalIgnoreCase) && !data.Contains("[Merger]") && !data.Contains("[ExtractAudio]"))
             {
-                var destMatch = DestRegex.Match(data);
+                var destMatch = FileTrackerRegex.Match(data);
                 if (destMatch.Success)
                 {
                     task.OutputPath = destMatch.Groups[1].Value.Trim();
@@ -216,7 +265,7 @@ namespace YTDLPHost.Services
                 }
             }
 
-            if (data.Contains("[Merger]") || data.Contains("[ExtractAudio]") || data.Contains("[MoveFiles]") || data.Contains("Fixing MPEG-TS"))
+            if (data.Contains("[Merger]") || data.Contains("[MoveFiles]") || data.Contains("Fixing MPEG-TS"))
             {
                 task.CurrentPhase = "Merging & Finalizing...";
                 task.IsIndeterminate = true;
@@ -226,7 +275,7 @@ namespace YTDLPHost.Services
 
                 if (data.Contains("Destination:"))
                 {
-                    var destMatch = DestRegex.Match(data);
+                    var destMatch = FileTrackerRegex.Match(data);
                     if (destMatch.Success)
                     {
                         task.OutputPath = destMatch.Groups[1].Value.Trim();
