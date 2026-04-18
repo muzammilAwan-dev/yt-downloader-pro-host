@@ -351,9 +351,10 @@ namespace YTDLPHost.ViewModels
             CleanupCookieFile(vm.Task);
         }
 
+        // THREAD-SAFETY FIX: Added .Distinct() to safely iterate the ConcurrentBag
         private void CleanupPartialFiles(DownloadTask task, bool forceDeleteAll = false)
         {
-            foreach (var filePath in task.TrackedFiles.ToList())
+            foreach (var filePath in task.TrackedFiles.Distinct().ToList())
             {
                 if (!forceDeleteAll && filePath.Equals(task.OutputPath, StringComparison.OrdinalIgnoreCase))
                 {
