@@ -38,7 +38,6 @@
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
 
                         <Border Grid.Column="0" 
@@ -75,32 +74,19 @@
                                    TextTrimming="CharacterEllipsis"
                                    VerticalAlignment="Center"/>
 
-                        <Border Grid.Column="2" 
-                                Background="{StaticResource SurfaceHoverBrush}"
-                                CornerRadius="4"
-                                Padding="6,2"
-                                Margin="8,0,8,0"
-                                Visibility="{Binding ResolutionDisplay, Converter={StaticResource ProgressToVisibilityConverter}}"
-                                VerticalAlignment="Center">
-                            <TextBlock Text="{Binding ResolutionDisplay}"
-                                       FontSize="11"
-                                       Foreground="{StaticResource TextSecondaryBrush}"/>
-                        </Border>
-
-                        <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
-                            
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                             <Button Style="{StaticResource IconButtonStyle}"
                                     Command="{Binding ToggleLogCommand}"
-                                    ToolTip="Logs"
+                                    ToolTip="View Logs"
                                     Margin="0,0,4,0">
-                                <Path Data="M19,19H5V5H19M19,3H5A2,2 0 0,0 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5A2,2 0 0,0 19,3M17,17H7V15H17M17,13H7V11H17M13,9H7V7H13" 
+                                <Path Data="M19,3H5C3.89,3 3,3.9 3,5V19C3,20.1 3.89,21 5,21H19C20.1,21 21,20.1 21,19V5C21,3.9 20.1,3 19,3M19,19H5V5H19V19M17,17H7V15H17V17M17,13H7V11H17V13M13,9H7V7H13V9Z" 
                                       Fill="{StaticResource TextMutedBrush}" Width="16" Height="16" Stretch="Uniform"/>
                             </Button>
 
                             <Button Style="{StaticResource IconButtonStyle}"
                                     Command="{Binding DataContext.OpenFolderCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
                                     CommandParameter="{Binding}"
-                                    ToolTip="Open Folder"
+                                    ToolTip="Open Download Folder"
                                     Visibility="{Binding Task.Status, Converter={StaticResource StatusToActionsVisibilityConverter}}"
                                     Margin="0,0,4,0">
                                 <Path Data="M20,6H12L10,4H4A2,2 0 0,0 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8A2,2 0 0,0 20,6Z" 
@@ -118,73 +104,28 @@
                             </Button>
 
                             <Button Style="{StaticResource IconButtonStyle}"
-                                    Command="{Binding DataContext.ResumeDownloadCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
-                                    CommandParameter="{Binding}"
-                                    ToolTip="Resume"
-                                    Visibility="{Binding IsResumable, Converter={StaticResource BoolToVisibilityConverter}}"
-                                    Margin="0,0,4,0">
-                                <Path Data="M8,5.14V19.14L19,12.14L8,5.14Z" 
-                                      Fill="{StaticResource SuccessBrush}" Width="16" Height="16" Stretch="Uniform"/>
-                            </Button>
-
-                            <Button Style="{StaticResource IconButtonStyle}"
-                                    Command="{Binding DataContext.PauseDownloadCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
-                                    CommandParameter="{Binding}"
-                                    ToolTip="Pause"
-                                    Visibility="{Binding CanBePaused, Converter={StaticResource BoolToVisibilityConverter}}"
-                                    Margin="0,0,4,0">
-                                <Path Data="M14,19H18V5H14M6,19H10V5H6V19Z" 
-                                      Fill="{StaticResource WarningBrush}" Width="16" Height="16" Stretch="Uniform"/>
-                            </Button>
-
-                            <Button Style="{StaticResource IconButtonStyle}"
                                     Command="{Binding DataContext.CancelDownloadCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
                                     CommandParameter="{Binding}"
-                                    ToolTip="Cancel (Deletes partial files)"
+                                    ToolTip="Cancel &amp; Cleanup"
                                     Visibility="{Binding CanBeCancelled, Converter={StaticResource BoolToVisibilityConverter}}">
                                 <Path Data="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z" 
                                       Fill="{StaticResource ErrorBrush}" Width="16" Height="16" Stretch="Uniform"/>
                             </Button>
-                            
-                            <Button Style="{StaticResource IconButtonStyle}"
-                                    Command="{Binding DataContext.RemoveDownloadCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
-                                    CommandParameter="{Binding}"
-                                    ToolTip="Remove from List"
-                                    Visibility="{Binding CanBeRemoved, Converter={StaticResource BoolToVisibilityConverter}}">
-                                <Path Data="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z" 
-                                      Fill="{StaticResource TextMutedBrush}" Width="16" Height="16" Stretch="Uniform"/>
-                            </Button>
-
                         </StackPanel>
                     </Grid>
 
-                    <Grid Grid.Row="1" Margin="22,8,0,0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-
-                        <TextBlock Grid.Column="0"
-                                   Text="{Binding ProgressDisplay}"
-                                   FontSize="12"
-                                   Foreground="{StaticResource TextSecondaryBrush}"
-                                   TextTrimming="CharacterEllipsis"/>
-
-                        <TextBlock Grid.Column="1"
-                                   Text="{Binding ResolutionDisplay}"
-                                   FontSize="12"
-                                   FontWeight="SemiBold"
-                                   Foreground="{StaticResource TextMutedBrush}"
-                                   Margin="8,0,0,0"
-                                   Visibility="{Binding ResolutionDisplay, Converter={StaticResource ProgressToVisibilityConverter}}"/>
-                    </Grid>
+                    <TextBlock Grid.Row="1" 
+                               Text="{Binding ProgressDisplay}"
+                               FontSize="12"
+                               Foreground="{StaticResource TextSecondaryBrush}"
+                               Margin="22,8,0,0"/>
 
                     <ProgressBar Grid.Row="2"
                                  Style="{StaticResource DownloadProgressBar}"
                                  Value="{Binding Progress, Mode=OneWay}"
-                                 IsIndeterminate="{Binding Task.IsIndeterminate, Mode=OneWay}"
+                                 IsIndeterminate="{Binding Task.IsIndeterminate}"
                                  Maximum="100"
-                                 Margin="22,8,0,0"
+                                 Margin="22,10,0,0"
                                  Visibility="{Binding Task.Status, Converter={StaticResource BoolToVisibilityConverter}, ConverterParameter=invert}"/>
 
                     <Border Grid.Row="3"
@@ -196,27 +137,12 @@
                             Padding="8"
                             Visibility="{Binding IsLogVisible, Converter={StaticResource BoolToVisibilityConverter}}">
                         <ScrollViewer Height="150" VerticalScrollBarVisibility="Auto">
-                            <TextBox Text="{Binding Task.UiLogText, Mode=OneWay}"
-                                     Background="Transparent"
-                                     Foreground="{StaticResource TextSecondaryBrush}"
-                                     BorderThickness="0"
-                                     IsReadOnly="True"
-                                     TextWrapping="Wrap"
-                                     FontSize="11"
-                                     FontFamily="Consolas, Monospace"/>
+                            <TextBlock Text="{Binding Task.UiLogText}"
+                                       Foreground="{StaticResource TextMutedBrush}"
+                                       TextWrapping="Wrap"
+                                       FontSize="11"
+                                       FontFamily="Consolas, Monospace"/>
                         </ScrollViewer>
-                    </Border>
-                    
-                    <Border Grid.Row="3"
-                            Background="#15F44336"
-                            CornerRadius="6"
-                            Padding="8,6"
-                            Margin="22,8,0,0"
-                            Visibility="{Binding HasError, Converter={StaticResource BoolToVisibilityConverter}}">
-                        <TextBlock Text="{Binding ErrorMessage}"
-                                   FontSize="11"
-                                   Foreground="{StaticResource ErrorBrush}"
-                                   TextWrapping="Wrap"/>
                     </Border>
                 </Grid>
             </Border>
@@ -225,10 +151,8 @@
         <Style x:Key="DownloadListItemContainer" TargetType="ListBoxItem">
             <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
             <Setter Property="Padding" Value="0"/>
-            <Setter Property="Margin" Value="0"/>
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ListBoxItem">
@@ -273,7 +197,7 @@
                                    Foreground="{StaticResource TextPrimaryBrush}"/>
                         
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="Native yt-dlp Host" 
+                            <TextBlock Text="Native Host" 
                                        FontSize="11" 
                                        Foreground="{StaticResource TextMutedBrush}"/>
                             <TextBlock Text=" • Crafted with ⚡ by muzammilAwan-dev" 
@@ -282,7 +206,6 @@
                                        Foreground="{StaticResource AccentBrush}" 
                                        Margin="4,0,0,0"/>
                         </StackPanel>
-
                     </StackPanel>
                 </StackPanel>
 
@@ -296,9 +219,10 @@
 
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                     <Button Style="{StaticResource IconButtonStyle}"
-                            Command="{Binding MinimizeToTrayCommand}"
+                            Click="OnMinimizeToTrayClick" 
                             ToolTip="Minimize to Tray"
-                            x:Name="MinimizeTrayButton">
+                            x:Name="MinimizeTrayButton"
+                            Margin="0,0,8,0">
                         <Path Data="M19,13H5V11H19V13Z" 
                               Fill="{StaticResource TextSecondaryBrush}" Width="16" Height="16" Stretch="Uniform"/>
                     </Button>
@@ -312,40 +236,13 @@
             </Grid>
         </Border>
 
-        <Grid Grid.Row="1">
-            <Grid Visibility="{Binding HasDownloads, Converter={StaticResource BoolToVisibilityConverter}, ConverterParameter=invert}"
-                  VerticalAlignment="Center"
-                  HorizontalAlignment="Center">
-                <StackPanel HorizontalAlignment="Center">
-                    <Path Data="M19,9H15V3H9V9H5L12,16L19,9M5,18V20H19V18H5Z" 
-                          Fill="{StaticResource SurfaceHoverBrush}" Width="64" Height="64" Stretch="Uniform"
-                          HorizontalAlignment="Center"/>
-                    <TextBlock Text="No active downloads" 
-                               FontSize="18"
-                               FontWeight="SemiBold"
-                               Foreground="{StaticResource TextSecondaryBrush}"
-                               HorizontalAlignment="Center"
-                               Margin="0,20,0,8"/>
-                    <TextBlock Text="Click the Download button in YouTube to add videos" 
-                               FontSize="13"
-                               Foreground="{StaticResource TextMutedBrush}"
-                               HorizontalAlignment="Center"/>
-                </StackPanel>
-            </Grid>
-
-            <ScrollViewer Visibility="{Binding HasDownloads, Converter={StaticResource BoolToVisibilityConverter}}"
-                          VerticalScrollBarVisibility="Auto"
-                          HorizontalScrollBarVisibility="Disabled"
-                          Padding="20,12"
-                          PanningMode="VerticalOnly">
-                <ListBox ItemsSource="{Binding Downloads}"
-                         ItemTemplate="{StaticResource DownloadItemTemplate}"
-                         ItemContainerStyle="{StaticResource DownloadListItemContainer}"
-                         VirtualizingPanel.IsVirtualizing="True"
-                         VirtualizingPanel.VirtualizationMode="Recycling"
-                         ScrollViewer.CanContentScroll="True"/>
-            </ScrollViewer>
-        </Grid>
+        <ListBox Grid.Row="1" 
+                 ItemsSource="{Binding Downloads}"
+                 ItemTemplate="{StaticResource DownloadItemTemplate}"
+                 ItemContainerStyle="{StaticResource DownloadListItemContainer}"
+                 Background="Transparent"
+                 BorderThickness="0"
+                 Padding="20,12"/>
 
         <Border Grid.Row="2"
                 Background="{StaticResource SurfaceBrush}"
