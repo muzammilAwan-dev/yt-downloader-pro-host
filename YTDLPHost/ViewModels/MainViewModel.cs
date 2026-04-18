@@ -8,6 +8,7 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Threading; // ADDED: For DispatcherPriority optimization
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using YTDLPHost.Models;
@@ -17,6 +18,12 @@ namespace YTDLPHost.ViewModels
 {
     public partial class MainViewModel : ObservableObject, IDisposable
     {
+        // OPTIMIZATION 1: Compiled static Regexes save CPU cycles and garbage collection overhead
+        private static readonly Regex CommandPathRegex = new(@"-(?:o|P)\s+""([^""]+)""", RegexOptions.Compiled);
+        private static readonly Regex OutputTemplateRegex = new(@"-o\s+""([^""]+)""", RegexOptions.Compiled);
+        private static readonly Regex ResHeightRegex = new(@"height<=?(\d+)", RegexOptions.Compiled);
+        private static readonly Regex ResRegex = new(@"(\d+)p", RegexOptions.Compiled);
+
         private readonly TrayIconService _trayService;
         private readonly ObservableCollection<DownloadItemViewModel> _downloads = new();
         private readonly Dictionary<Guid, YtDlpRunner> _activeRunners = new();
@@ -99,20 +106,6 @@ namespace YTDLPHost.ViewModels
             };
 
             CheckYtDlpExists();
-
-            // [FIX APPLIED] SILENT ENGINE UPDATE: Keeps yt-dlp healthy without bothering the user
-            _ = Task.Run(() => {
-                try 
-                { 
-                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo 
-                    { 
-                        FileName = "yt-dlp.exe", 
-                        Arguments = "-U", 
-                        CreateNoWindow = true, 
-                        UseShellExecute = false 
-                    }); 
-                } catch { }
-            });
         }
 
         private async void CheckYtDlpExists()
@@ -161,7 +154,7 @@ namespace YTDLPHost.ViewModels
                 }
             }
 
-            var match = Regex.Match(command, @"-(?:o|P)\s+""([^""]+)""");
+            var match = CommandPathRegex.Match(command);
             if (match.Success)
             {
                 string path = match.Groups[1].Value;
@@ -205,9 +198,6 @@ namespace YTDLPHost.ViewModels
                     System.Windows.MessageBox.Show("A potentially unsafe download command was blocked for your security.", "YT Downloader Pro - Security Alert", MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
                 }
-
-                // [FIX APPLIED] GUI SAFETY: Force --progress so the UI progress bar never breaks on custom commands
-                if (!command.Contains("--progress")) command += " --progress";
 
                 string? cookieContent = null;
                 string? cookieFilePath = null;
@@ -306,10 +296,11 @@ namespace YTDLPHost.ViewModels
             _ = ProcessQueueAsync();
         }
 
+        // OPTIMIZATION 2: Using DispatcherPriority.Background keeps the UI fully responsive during fast updates
         private void OnRunnerProgress(object? sender, ProgressEventArgs e)
         {
             var vm = _downloads.FirstOrDefault(d => d.Id == e.TaskId);
-            if (vm != null) System.Windows.Application.Current?.Dispatcher.BeginInvoke(() => { vm.Refresh(); UpdateActiveCount(); });
+            if (vm != null) System.Windows.Application.Current?.Dispatcher.BeginInvoke(DispatcherPriority.Background, () => { vm.Refresh(); UpdateActiveCount(); });
         }
 
         private void OnRunnerComplete(object? sender, CompleteEventArgs e)
@@ -317,7 +308,7 @@ namespace YTDLPHost.ViewModels
             var vm = _downloads.FirstOrDefault(d => d.Id == e.TaskId);
             if (vm != null)
             {
-                System.Windows.Application.Current?.Dispatcher.BeginInvoke(() =>
+                System.Windows.Application.Current?.Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
                 {
                     vm.Refresh();
                     HasCompletedDownloads = true;
@@ -332,21 +323,13 @@ namespace YTDLPHost.ViewModels
         private void OnRunnerError(object? sender, DownloadErrorEventArgs e)
         {
             var vm = _downloads.FirstOrDefault(d => d.Id == e.TaskId);
-            if (vm != null) System.Windows.Application.Current?.Dispatcher.BeginInvoke(() => { vm.Refresh(); UpdateActiveCount(); });
+            if (vm != null) System.Windows.Application.Current?.Dispatcher.BeginInvoke(DispatcherPriority.Background, () => { vm.Refresh(); UpdateActiveCount(); });
         }
 
         private void OnRunnerInfo(object? sender, ExtractedInfoEventArgs e)
         {
             var vm = _downloads.FirstOrDefault(d => d.Id == e.TaskId);
-            if (vm != null) 
-            {
-                System.Windows.Application.Current?.Dispatcher.BeginInvoke(() => 
-                {
-                    vm.Refresh();
-                    // [FIX APPLIED] FOOTER TITLE SYNC: Updates bottom status bar instantly when title is found
-                    if (vm.Task.Status == DownloadStatus.Downloading) StatusText = $"Downloading: {vm.DisplayTitle}";
-                });
-            }
+            if (vm != null) System.Windows.Application.Current?.Dispatcher.BeginInvoke(DispatcherPriority.Background, () => vm.Refresh());
         }
 
         private void PauseDownload(DownloadItemViewModel? vm)
@@ -530,16 +513,19 @@ namespace YTDLPHost.ViewModels
         private static string ExtractResolution(string command)
         {
             if (command.Contains("ba") && (command.Contains("extract-audio") || command.Contains("audio"))) return "Audio";
-            var match = Regex.Match(command, @"height<=?(\d+)");
+            
+            var match = ResHeightRegex.Match(command);
             if (match.Success) return match.Groups[1].Value + "p";
-            match = Regex.Match(command, @"(\d+)p");
+            
+            match = ResRegex.Match(command);
             if (match.Success) return match.Groups[1].Value + "p";
+            
             return "";
         }
 
         private static string ExtractTitleHint(string command)
         {
-            var match = Regex.Match(command, @"-o\s+""([^""]+)""");
+            var match = OutputTemplateRegex.Match(command);
             if (match.Success)
             {
                 return Path.GetFileNameWithoutExtension(match.Groups[1].Value)
@@ -550,7 +536,7 @@ namespace YTDLPHost.ViewModels
 
         private static string ExtractSaveDirectory(string command)
         {
-            var match = Regex.Match(command, @"-o\s+""([^""]+)""");
+            var match = OutputTemplateRegex.Match(command);
             if (match.Success)
             {
                 var template = match.Groups[1].Value;
