@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
@@ -17,7 +18,11 @@ namespace YTDLPHost.ViewModels
     {
         private readonly TrayIconService _trayService;
         private readonly ObservableCollection<DownloadItemViewModel> _downloads = new();
-        private YtDlpRunner? _currentRunner;
+        
+        // CONCURRENT UPGRADE: Manager now holds up to 3 runners at once!
+        private readonly Dictionary<Guid, YtDlpRunner> _activeRunners = new();
+        private const int MaxConcurrentDownloads = 3; 
+
         private bool _isProcessingQueue;
         private bool _disposed;
 
@@ -45,8 +50,9 @@ namespace YTDLPHost.ViewModels
         public ObservableCollection<DownloadItemViewModel> Downloads => _downloads;
 
         public IRelayCommand<string> ProcessUrlCommand { get; }
+        public IRelayCommand<DownloadItemViewModel> PauseDownloadCommand { get; }
         public IRelayCommand<DownloadItemViewModel> CancelDownloadCommand { get; }
-        public IRelayCommand<DownloadItemViewModel> ResumeDownloadCommand { get; } // NEW
+        public IRelayCommand<DownloadItemViewModel> ResumeDownloadCommand { get; }
         public IRelayCommand<DownloadItemViewModel> RemoveDownloadCommand { get; }
         public IRelayCommand<DownloadItemViewModel> OpenFolderCommand { get; }
         public IRelayCommand<DownloadItemViewModel> PlayFileCommand { get; }
@@ -66,8 +72,9 @@ namespace YTDLPHost.ViewModels
             _trayService.Initialize();
 
             ProcessUrlCommand = new RelayCommand<string>(ProcessUrl);
+            PauseDownloadCommand = new RelayCommand<DownloadItemViewModel>(PauseDownload);
             CancelDownloadCommand = new RelayCommand<DownloadItemViewModel>(CancelDownload);
-            ResumeDownloadCommand = new RelayCommand<DownloadItemViewModel>(ResumeDownload); // NEW
+            ResumeDownloadCommand = new RelayCommand<DownloadItemViewModel>(ResumeDownload);
             RemoveDownloadCommand = new RelayCommand<DownloadItemViewModel>(RemoveDownload);
             OpenFolderCommand = new RelayCommand<DownloadItemViewModel>(OpenFolder);
             PlayFileCommand = new RelayCommand<DownloadItemViewModel>(PlayFile);
@@ -75,7 +82,16 @@ namespace YTDLPHost.ViewModels
             ClearCompletedCommand = new RelayCommand(ClearCompleted);
             ShowWindowCommand = new RelayCommand(() => RequestShowWindow?.Invoke(this, EventArgs.Empty));
             ExitCommand = new RelayCommand(ExitApplication);
-            MinimizeToTrayCommand = new RelayCommand(() => IsWindowVisible = false);
+            
+            // FIXED: Physically tell the application window to minimize
+            MinimizeToTrayCommand = new RelayCommand(() => 
+            {
+                IsWindowVisible = false;
+                if (System.Windows.Application.Current?.MainWindow != null)
+                {
+                    System.Windows.Application.Current.MainWindow.WindowState = WindowState.Minimized;
+                }
+            });
 
             _downloads.CollectionChanged += (s, e) =>
             {
@@ -138,18 +154,10 @@ namespace YTDLPHost.ViewModels
                 var payload = url.Substring(8).TrimEnd('/');
                 var parts = payload.Split(new[] { "||" }, StringSplitOptions.None);
 
-                if (parts.Length == 0 || string.IsNullOrWhiteSpace(parts[0]))
-                {
-                    StatusText = "Invalid download link received.";
-                    return;
-                }
+                if (parts.Length == 0 || string.IsNullOrWhiteSpace(parts[0])) return;
 
                 var command = DecodeBase64(parts[0]);
-                if (string.IsNullOrWhiteSpace(command))
-                {
-                    StatusText = "Invalid download link received.";
-                    return;
-                }
+                if (string.IsNullOrWhiteSpace(command)) return;
 
                 string? cookieContent = null;
                 string? cookieFilePath = null;
@@ -166,13 +174,8 @@ namespace YTDLPHost.ViewModels
                             cookieFilePath = cookieFile;
                         }
                     }
-                    catch (Exception ex)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"Cookie write failed: {ex.Message}");
-                    }
+                    catch { }
                 }
-
-                var resolution = ExtractResolution(command);
 
                 var task = new DownloadTask
                 {
@@ -180,7 +183,7 @@ namespace YTDLPHost.ViewModels
                     Command = command,
                     CookiePayload = cookieContent,
                     CookieFilePath = cookieFilePath ?? string.Empty,
-                    Resolution = resolution,
+                    Resolution = ExtractResolution(command),
                     Title = ExtractTitleHint(command),
                     Status = DownloadStatus.Queued
                 };
@@ -191,19 +194,12 @@ namespace YTDLPHost.ViewModels
 
                 StatusText = $"Added: {vm.DisplayTitle}";
                 UpdateActiveCount();
-
                 _ = ProcessQueueAsync();
             }
-            catch (FormatException)
-            {
-                StatusText = "Invalid download link received (bad Base64).";
-            }
-            catch (Exception ex)
-            {
-                StatusText = $"Error processing URL: {ex.Message}";
-            }
+            catch { }
         }
 
+        // CONCURRENT UPGRADE: Now processes up to 3 queue items at once!
         private async Task ProcessQueueAsync()
         {
             if (_isProcessingQueue) return;
@@ -213,6 +209,8 @@ namespace YTDLPHost.ViewModels
             {
                 while (!_disposed)
                 {
+                    if (_activeRunners.Count >= MaxConcurrentDownloads) break;
+
                     var next = _downloads.FirstOrDefault(d => d.Task.Status == DownloadStatus.Queued);
                     if (next == null) break;
 
@@ -224,22 +222,11 @@ namespace YTDLPHost.ViewModels
                     StatusText = $"Downloading: {next.DisplayTitle}";
                     UpdateActiveCount();
 
-                    _currentRunner = new YtDlpRunner();
-                    _currentRunner.OnProgressUpdate += OnRunnerProgress;
-                    _currentRunner.OnDownloadComplete += OnRunnerComplete;
-                    _currentRunner.OnDownloadError += OnRunnerError;
-                    _currentRunner.OnInfoExtracted += OnRunnerInfo;
-
-                    await _currentRunner.ExecuteAsync(next.Task);
-
-                    _currentRunner.Dispose();
-                    _currentRunner = null;
-
-                    UpdateActiveCount();
+                    // Fire and forget the runner so the loop can pick up the next concurrent task!
+                    _ = StartDownloadTaskAsync(next);
                 }
 
-                var remaining = _downloads.Count(d => d.Task.Status == DownloadStatus.Downloading || d.Task.Status == DownloadStatus.Queued);
-                if (remaining == 0)
+                if (_activeRunners.Count == 0 && _downloads.Count(d => d.Task.Status == DownloadStatus.Queued) == 0)
                 {
                     StatusText = "All downloads complete";
                 }
@@ -250,17 +237,31 @@ namespace YTDLPHost.ViewModels
             }
         }
 
+        private async Task StartDownloadTaskAsync(DownloadItemViewModel vm)
+        {
+            var runner = new YtDlpRunner();
+            _activeRunners[vm.Id] = runner;
+
+            runner.OnProgressUpdate += OnRunnerProgress;
+            runner.OnDownloadComplete += OnRunnerComplete;
+            runner.OnDownloadError += OnRunnerError;
+            runner.OnInfoExtracted += OnRunnerInfo;
+
+            await runner.ExecuteAsync(vm.Task);
+
+            runner.Dispose();
+            _activeRunners.Remove(vm.Id);
+
+            UpdateActiveCount();
+            
+            // Task finished, pull the next one from the queue automatically
+            _ = ProcessQueueAsync();
+        }
+
         private void OnRunnerProgress(object? sender, ProgressEventArgs e)
         {
             var vm = _downloads.FirstOrDefault(d => d.Id == e.TaskId);
-            if (vm != null)
-            {
-                System.Windows.Application.Current?.Dispatcher.BeginInvoke(() =>
-                {
-                    vm.Refresh();
-                    UpdateActiveCount();
-                });
-            }
+            if (vm != null) System.Windows.Application.Current?.Dispatcher.BeginInvoke(() => { vm.Refresh(); UpdateActiveCount(); });
         }
 
         private void OnRunnerComplete(object? sender, CompleteEventArgs e)
@@ -273,7 +274,6 @@ namespace YTDLPHost.ViewModels
                     vm.Refresh();
                     HasCompletedDownloads = true;
                     UpdateActiveCount();
-
                     _trayService.ShowDownloadCompleteNotification("Download Complete", e.Title);
                 });
             }
@@ -282,40 +282,65 @@ namespace YTDLPHost.ViewModels
         private void OnRunnerError(object? sender, DownloadErrorEventArgs e)
         {
             var vm = _downloads.FirstOrDefault(d => d.Id == e.TaskId);
-            if (vm != null)
-            {
-                System.Windows.Application.Current?.Dispatcher.BeginInvoke(() =>
-                {
-                    vm.Refresh();
-                    UpdateActiveCount();
-                });
-            }
+            if (vm != null) System.Windows.Application.Current?.Dispatcher.BeginInvoke(() => { vm.Refresh(); UpdateActiveCount(); });
         }
 
         private void OnRunnerInfo(object? sender, ExtractedInfoEventArgs e)
         {
             var vm = _downloads.FirstOrDefault(d => d.Id == e.TaskId);
-            if (vm != null)
-            {
-                System.Windows.Application.Current?.Dispatcher.BeginInvoke(() => vm.Refresh());
-            }
+            if (vm != null) System.Windows.Application.Current?.Dispatcher.BeginInvoke(() => vm.Refresh());
+        }
+
+        private void PauseDownload(DownloadItemViewModel? vm)
+        {
+            if (vm == null) return;
+
+            if (_activeRunners.TryGetValue(vm.Id, out var runner))
+                runner.Cancel();
+
+            vm.Task.Status = DownloadStatus.Paused;
+            vm.Refresh();
+            UpdateActiveCount();
         }
 
         private void CancelDownload(DownloadItemViewModel? vm)
         {
             if (vm == null) return;
 
-            if (vm.Task.Status == DownloadStatus.Downloading && _currentRunner != null)
-            {
-                _currentRunner.Cancel();
-            }
+            if (_activeRunners.TryGetValue(vm.Id, out var runner))
+                runner.Cancel();
 
             vm.Task.Status = DownloadStatus.Cancelled;
             vm.Refresh();
             UpdateActiveCount();
+
+            Task.Run(() => CleanupPartialFiles(vm.Task));
+            CleanupCookieFile(vm.Task);
         }
 
-        // NEW: Resumes a paused/cancelled download by setting it back to Queued
+        private void CleanupPartialFiles(DownloadTask task)
+        {
+            if (string.IsNullOrEmpty(task.OutputPath)) return;
+            try
+            {
+                string dir = Path.GetDirectoryName(task.OutputPath) ?? "";
+                string title = Path.GetFileNameWithoutExtension(task.OutputPath);
+
+                if (Directory.Exists(dir) && !string.IsNullOrEmpty(title))
+                {
+                    var files = Directory.GetFiles(dir, $"{title}*");
+                    foreach (var file in files)
+                    {
+                        if (file.EndsWith(".part") || file.EndsWith(".ytdl") || file.EndsWith(".frag"))
+                        {
+                            File.Delete(file);
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
         private void ResumeDownload(DownloadItemViewModel? vm)
         {
             if (vm == null) return;
@@ -324,8 +349,6 @@ namespace YTDLPHost.ViewModels
             vm.Task.ErrorMessage = "";
             vm.Refresh();
             UpdateActiveCount();
-            
-            // Kickstart the queue loop again if it was idle
             _ = ProcessQueueAsync();
         }
 
@@ -333,10 +356,8 @@ namespace YTDLPHost.ViewModels
         {
             if (vm == null) return;
 
-            if (vm.Task.Status == DownloadStatus.Downloading && _currentRunner != null)
-            {
-                _currentRunner.Cancel();
-            }
+            if (_activeRunners.TryGetValue(vm.Id, out var runner))
+                runner.Cancel();
 
             CleanupCookieFile(vm.Task);
             _downloads.Remove(vm);
@@ -346,29 +367,13 @@ namespace YTDLPHost.ViewModels
         private static void OpenFolder(DownloadItemViewModel? vm)
         {
             if (vm?.Task?.OutputPath == null) return;
-
             var path = vm.Task.OutputPath;
             if (File.Exists(path))
             {
-                var dir = Path.GetDirectoryName(path);
-                if (!string.IsNullOrEmpty(dir))
-                {
-                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                    {
-                        FileName = "explorer.exe",
-                        Arguments = $"/select,\"{path}\"",
-                        UseShellExecute = true
-                    });
-                    return;
-                }
-            }
-
-            var saveDir = ExtractSaveDirectory(vm.Task.Command);
-            if (Directory.Exists(saveDir))
-            {
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
                 {
-                    FileName = saveDir,
+                    FileName = "explorer.exe",
+                    Arguments = $"/select,\"{path}\"",
                     UseShellExecute = true
                 });
             }
@@ -377,13 +382,11 @@ namespace YTDLPHost.ViewModels
         private static void PlayFile(DownloadItemViewModel? vm)
         {
             if (vm?.Task?.OutputPath == null) return;
-
-            var path = vm.Task.OutputPath;
-            if (File.Exists(path))
+            if (File.Exists(vm.Task.OutputPath))
             {
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
                 {
-                    FileName = path,
+                    FileName = vm.Task.OutputPath,
                     UseShellExecute = true
                 });
             }
@@ -404,32 +407,25 @@ namespace YTDLPHost.ViewModels
         private static void CleanupCookieFile(DownloadTask task)
         {
             if (!string.IsNullOrEmpty(task.CookieFilePath) && File.Exists(task.CookieFilePath))
-            {
                 try { File.Delete(task.CookieFilePath); } catch { }
-            }
         }
 
         private void UpdateActiveCount()
         {
             ActiveDownloadCount = _downloads.Count(d => d.Task.Status == DownloadStatus.Queued || d.Task.Status == DownloadStatus.Downloading);
-            _trayService.UpdateTooltip(ActiveDownloadCount == 0
-                ? "YT Downloader Pro - Idle"
-                : $"YT Downloader Pro - {ActiveDownloadCount} active");
+            _trayService.UpdateTooltip(ActiveDownloadCount == 0 ? "YT Downloader Pro - Idle" : $"YT Downloader Pro - {ActiveDownloadCount} active");
         }
 
         private static string DecodeBase64(string input)
         {
             string padded = input.Replace('-', '+').Replace('_', '/');
             padded = padded.PadRight(padded.Length + (4 - padded.Length % 4) % 4, '=');
-            
-            var bytes = Convert.FromBase64String(padded);
-            return Encoding.UTF8.GetString(bytes);
+            return Encoding.UTF8.GetString(Convert.FromBase64String(padded));
         }
 
         private static string ExtractResolution(string command)
         {
-            if (command.Contains("ba") && (command.Contains("extract-audio") || command.Contains("audio")))
-                return "Audio";
+            if (command.Contains("ba") && (command.Contains("extract-audio") || command.Contains("audio"))) return "Audio";
             var match = System.Text.RegularExpressions.Regex.Match(command, @"height<=?(\d+)");
             if (match.Success) return match.Groups[1].Value + "p";
             match = System.Text.RegularExpressions.Regex.Match(command, @"(\d+)p");
@@ -442,43 +438,16 @@ namespace YTDLPHost.ViewModels
             var match = System.Text.RegularExpressions.Regex.Match(command, @"-o\s+""([^""]+)""");
             if (match.Success)
             {
-                var template = match.Groups[1].Value;
-                return Path.GetFileNameWithoutExtension(template)
-                    .Replace("%(title)s", "YouTube Video")
-                    .Replace("%(uploader)s", "Channel");
+                return Path.GetFileNameWithoutExtension(match.Groups[1].Value)
+                    .Replace("%(title)s", "YouTube Video").Replace("%(uploader)s", "Channel");
             }
             return "YouTube Video";
         }
 
-        private static string ExtractSaveDirectory(string command)
-        {
-            var match = System.Text.RegularExpressions.Regex.Match(command, @"-o\s+""([^""]+)""");
-            if (match.Success)
-            {
-                var template = match.Groups[1].Value;
-                var dir = Path.GetDirectoryName(template);
-                if (!string.IsNullOrEmpty(dir))
-                {
-                    dir = Environment.ExpandEnvironmentVariables(dir);
-                    if (dir.StartsWith("~"))
-                        dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), dir.Substring(1).TrimStart('/', '\\'));
-                    if (Directory.Exists(dir))
-                        return dir;
-                }
-            }
-            return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        }
-
         private void ExitApplication()
         {
-            foreach (var vm in _downloads)
-            {
-                CleanupCookieFile(vm.Task);
-            }
-
-            _currentRunner?.Cancel();
-            _currentRunner?.Dispose();
-
+            foreach (var vm in _downloads) CleanupCookieFile(vm.Task);
+            foreach (var runner in _activeRunners.Values) runner.Cancel();
             System.Windows.Application.Current?.Shutdown();
         }
 
@@ -489,15 +458,8 @@ namespace YTDLPHost.ViewModels
         {
             if (_disposed) return;
             _disposed = true;
-
-            _currentRunner?.Cancel();
-            _currentRunner?.Dispose();
-
-            foreach (var vm in _downloads)
-            {
-                CleanupCookieFile(vm.Task);
-            }
-
+            foreach (var runner in _activeRunners.Values) runner.Dispose();
+            foreach (var vm in _downloads) CleanupCookieFile(vm.Task);
             _trayService.Dispose();
         }
     }
