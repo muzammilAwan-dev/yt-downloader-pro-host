@@ -84,7 +84,7 @@ namespace YTDLPHost.ViewModels
             CheckYtDlpExists();
         }
 
-        private void CheckYtDlpExists()
+        private async void CheckYtDlpExists()
         {
             try
             {
@@ -96,21 +96,25 @@ namespace YTDLPHost.ViewModels
                     UseShellExecute = false,
                     RedirectStandardOutput = true
                 };
-                using var proc = System.Diagnostics.Process.Start(psi);
-                if (proc != null)
+
+                await Task.Run(() => 
                 {
-                    proc.WaitForExit(5000);
-                }
+                    using var proc = System.Diagnostics.Process.Start(psi);
+                    proc?.WaitForExit(5000);
+                });
             }
             catch
             {
-                StatusText = "yt-dlp not found. Please run setup.bat first.";
-                System.Windows.MessageBox.Show(
-                    "yt-dlp.exe was not found in your PATH.\n\n" +
-                    "Please run setup.bat first to install yt-dlp, ffmpeg, and configure the protocol handler.",
-                    "YT Downloader Pro - Component Missing",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Error);
+                System.Windows.Application.Current?.Dispatcher.BeginInvoke(() =>
+                {
+                    StatusText = "yt-dlp not found. Please run setup.bat first.";
+                    System.Windows.MessageBox.Show(
+                        "yt-dlp.exe was not found in your PATH.\n\n" +
+                        "Please run setup.bat first to install yt-dlp, ffmpeg, and configure the protocol handler.",
+                        "YT Downloader Pro - Component Missing",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Error);
+                });
             }
         }
 
@@ -120,6 +124,8 @@ namespace YTDLPHost.ViewModels
 
             try
             {
+                url = Uri.UnescapeDataString(url);
+
                 if (!url.StartsWith("ytdlp://", StringComparison.OrdinalIgnoreCase))
                 {
                     StatusText = "Invalid protocol URL received.";
