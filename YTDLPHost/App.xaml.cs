@@ -64,7 +64,8 @@ namespace YTDLPHost
 
             _mainWindow = new MainWindow { DataContext = _mainViewModel };
             _mainWindow.Closing += OnMainWindowClosing;
-            _mainWindow.StateChanged += OnMainWindowStateChanged;
+            
+            // [FIX APPLIED] Removed the StateChanged event hook here so standard minimize goes to the Taskbar
 
             _mainWindow.Show();
             _mainWindow.Activate();
@@ -106,14 +107,7 @@ namespace YTDLPHost
             _mainViewModel!.IsWindowVisible = false;
         }
 
-        private void OnMainWindowStateChanged(object? sender, EventArgs e)
-        {
-            if (_mainWindow?.WindowState == WindowState.Minimized)
-            {
-                _mainWindow.Hide();
-                _mainViewModel!.IsWindowVisible = false;
-            }
-        }
+        // [FIX APPLIED] Removed the OnMainWindowStateChanged method completely
 
         protected override void OnExit(ExitEventArgs e)
         {
