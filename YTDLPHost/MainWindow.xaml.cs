@@ -1,11 +1,19 @@
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Input;
 using YTDLPHost.ViewModels;
 using YTDLPHost.Services;
 
+// EXPLICIT ALIASES: Resolves the ambiguous reference between WPF and WinForms
+using Button = System.Windows.Controls.Button;
+using ContextMenu = System.Windows.Controls.ContextMenu;
+using MenuItem = System.Windows.Controls.MenuItem;
+using Separator = System.Windows.Controls.Separator;
+
 namespace YTDLPHost
 {
+    /// <summary>
+    /// Interaction logic for the main application window.
+    /// </summary>
     public partial class MainWindow : Window
     {
         public MainWindow()
@@ -24,10 +32,24 @@ namespace YTDLPHost
 
         private void OnRequestScrollToItem(object? sender, DownloadItemViewModel item)
         {
-            // The ListBox will automatically show the item due to selection
-            // Could implement scroll-into-view here if needed
+            // The ListBox will automatically show the item due to selection behavior
         }
 
+        /// <summary>
+        /// Handles the custom minimize button to hide the application to the system tray.
+        /// </summary>
+        private void OnMinimizeToTrayClick(object sender, RoutedEventArgs e)
+        {
+            Hide();
+            if (DataContext is MainViewModel vm)
+            {
+                vm.IsWindowVisible = false;
+            }
+        }
+
+        /// <summary>
+        /// Opens the settings context menu for protocol registration management.
+        /// </summary>
         private void OnSettingsClick(object sender, RoutedEventArgs e)
         {
             var menu = new ContextMenu
@@ -47,7 +69,7 @@ namespace YTDLPHost
             registerItem.Click += (s, args) =>
             {
                 ProtocolHandler.Register();
-                System.Windows.MessageBox.Show(this, "Protocol handler registered.", "YT Downloader Pro", MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show(this, "Protocol handler registered.", "YT Downloader Pro", MessageBoxButton.OK, MessageBoxImage.Information);
             };
 
             var unregisterItem = new MenuItem
@@ -59,7 +81,7 @@ namespace YTDLPHost
             unregisterItem.Click += (s, args) =>
             {
                 ProtocolHandler.Unregister();
-                System.Windows.MessageBox.Show(this, "Protocol handler unregistered.", "YT Downloader Pro", MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show(this, "Protocol handler unregistered.", "YT Downloader Pro", MessageBoxButton.OK, MessageBoxImage.Information);
             };
 
             var exitItem = new MenuItem
@@ -81,7 +103,7 @@ namespace YTDLPHost
             menu.Items.Add(new Separator { Background = (System.Windows.Media.Brush)FindResource("BorderBrush") });
             menu.Items.Add(exitItem);
 
-            if (sender is System.Windows.Controls.Button btn)
+            if (sender is Button btn)
             {
                 menu.PlacementTarget = btn;
                 menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
