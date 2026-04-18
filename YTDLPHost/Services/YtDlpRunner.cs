@@ -19,7 +19,6 @@ namespace YTDLPHost.Services
         private bool _extractionComplete;
         private bool _disposed;
 
-        // Performance throttling: Only update UI thread 10 times per second maximum (100ms)
         private DateTime _lastUiUpdate = DateTime.MinValue;
 
         public event EventHandler<ProgressEventArgs>? OnProgressUpdate;
@@ -36,17 +35,18 @@ namespace YTDLPHost.Services
             _extractionComplete = false;
             task.ClearLog();
 
+            // FIXED: Bulletproof Regex to strip redundant "yt-dlp" text from the payload
+            var command = task.Command.Trim();
+            command = Regex.Replace(command, @"^(?:yt-dlp\.exe|yt-dlp)\s+", "", RegexOptions.IgnoreCase);
+
             task.AppendLog("=== Download Task Started ===");
-            task.AppendLog($"Original Payload: {task.UrlPayload}");
-            task.AppendLog($"Command: yt-dlp.exe {task.Command}");
+            task.AppendLog($"Command executed: yt-dlp.exe {command}");
             task.AppendLog("");
 
             try
             {
-                var command = task.Command;
                 var saveDirectory = ExtractSaveDirectory(command);
 
-                // Dynamically inject cookie file path if Bypass was enabled
                 if (!string.IsNullOrEmpty(task.CookieFilePath) && File.Exists(task.CookieFilePath))
                 {
                     command += $" --cookies \"{task.CookieFilePath}\"";
@@ -79,7 +79,7 @@ namespace YTDLPHost.Services
 
                 await tcs.Task;
 
-                if (_disposed) return; // Ignore if task was cancelled
+                if (_disposed) return;
 
                 if (_process.ExitCode == 0)
                 {
@@ -132,13 +132,11 @@ namespace YTDLPHost.Services
         {
             if (string.IsNullOrWhiteSpace(data)) return;
 
-            // 1. Capture preliminary logs immediately for the UI log box
             task.AppendLog(data);
 
             bool needsUiUpdate = false;
             double oldProgress = task.Progress;
 
-            // 2. Set Status = Downloading immediately so user knows something is happening
             if (!_extractionComplete && (data.Contains("[youtube]") || data.Contains("[info]")))
             {
                 _extractionComplete = true;
@@ -149,7 +147,6 @@ namespace YTDLPHost.Services
                 }
             }
 
-            // 3. Regular progress bar updates [download]
             if (data.Contains("[download]"))
             {
                 _downloadStarted = true;
@@ -159,31 +156,24 @@ namespace YTDLPHost.Services
                     needsUiUpdate = true;
                 }
 
-                // Match percentage (e.g., 25.5% or 100%)
                 var percentMatch = Regex.Match(data, @"\[download\]\s+(?:(\d+\.?\d*)%|100%)");
                 if (percentMatch.Success)
                 {
                     if (double.TryParse(percentMatch.Groups[1].Value, out var percent))
-                    {
                         task.Progress = Math.Min(percent, 100.0);
-                    }
                     else if (data.Contains("100%"))
-                    {
                         task.Progress = 100.0;
-                    }
+                    
                     if (task.Progress > oldProgress) needsUiUpdate = true;
                 }
 
-                // Match speed
                 var speedMatch = Regex.Match(data, @"at\s+([\d\.]+[KMG]iB/s)");
                 if (speedMatch.Success) { task.Speed = speedMatch.Groups[1].Value; needsUiUpdate = true; }
 
-                // Match ETA
                 var etaMatch = Regex.Match(data, @"ETA\s+([\d:]+)");
                 if (etaMatch.Success) { task.Eta = etaMatch.Groups[1].Value; needsUiUpdate = true; }
             }
 
-            // 4. Extract real final file path/title when available
             if (data.Contains("Destination:", StringComparison.OrdinalIgnoreCase))
             {
                 var destMatch = Regex.Match(data, @"Destination:\s+(.+)");
@@ -194,12 +184,10 @@ namespace YTDLPHost.Services
                     if (!string.IsNullOrEmpty(tempFileName) && task.Title == "Unknown")
                         task.Title = tempFileName;
                     
-                    // Signal MainViewModel to update the DisplayTitle
                     OnInfoExtracted?.Invoke(this, new ExtractedInfoEventArgs(task.Id, task.Title, task.OutputPath));
                 }
             }
 
-            // 5. Detect Merger / Post-Processor Output Path
             if ((data.Contains("[Merger]") || data.Contains("[ExtractAudio]") || data.Contains("[MoveFiles]")) 
                 && data.Contains("Destination:"))
             {
@@ -213,14 +201,12 @@ namespace YTDLPHost.Services
                 }
             }
 
-            // PERFORMANCE THROTTLING: Avoid overloading the WPF dispatcher thread
             if (needsUiUpdate)
             {
                 var now = DateTime.Now;
                 if ((now - _lastUiUpdate).TotalMilliseconds >= 100 || task.Progress >= 100.0)
                 {
                     _lastUiUpdate = now;
-                    // Signal the progress change event, which leads to `vm.Refresh()` bounded to UI thread
                     OnProgressUpdate?.Invoke(this, new ProgressEventArgs(task.Id, task.Progress, task.Speed, task.Eta));
                 }
             }
@@ -235,7 +221,6 @@ namespace YTDLPHost.Services
 
         private static string ExtractSaveDirectory(string command)
         {
-            // Try to find save path template -o
             var match = Regex.Match(command, @"-o\s+""([^""]+)""");
             if (match.Success)
             {
@@ -248,7 +233,6 @@ namespace YTDLPHost.Services
                 }
             }
 
-            // Try to find fixed base path -P
             match = Regex.Match(command, @"-P\s+""([^""]+)""");
             if (match.Success)
             {
@@ -256,7 +240,6 @@ namespace YTDLPHost.Services
                 if (Directory.Exists(dir)) return dir;
             }
 
-            // Default to Windows user profile Downloads or Documents
             string downloadsPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
             if (Directory.Exists(downloadsPath)) return downloadsPath;
             
@@ -268,7 +251,14 @@ namespace YTDLPHost.Services
             if (string.IsNullOrWhiteSpace(task.OutputPath)) return;
 
             string saveDir = Path.GetDirectoryName(task.OutputPath) ?? "";
-            if (!Directory.Exists(saveDir)) return;
+            if (string.IsNullOrEmpty(saveDir)) return;
+
+            // FIXED: Create an isolated log folder to keep user directories clean
+            string logDir = Path.Combine(saveDir, "YTDLP-Video-logs");
+            if (!Directory.Exists(logDir))
+            {
+                try { Directory.CreateDirectory(logDir); } catch { return; }
+            }
 
             try
             {
@@ -278,7 +268,7 @@ namespace YTDLPHost.Services
 
                 string sanitizedTitle = Regex.Replace(baseFileName, @"[^\w\-\.]", "_");
                 string logFileName = $"{sanitizedTitle}.log";
-                string finalLogPath = Path.Combine(saveDir, logFileName);
+                string finalLogPath = Path.Combine(logDir, logFileName);
 
                 File.WriteAllText(finalLogPath, task.FullLogText, Encoding.UTF8);
                 task.AppendLog($"[INFO] Full logs saved to: {finalLogPath}");
