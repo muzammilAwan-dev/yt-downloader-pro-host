@@ -15,10 +15,12 @@ namespace YTDLPHost.Services
         private Process? _process;
         private readonly CancellationTokenSource _cts = new();
         private readonly StringBuilder _errorBuffer = new();
-        private readonly StringBuilder _recentOutput = new();
-        
-        private DateTime _lastUpdate = DateTime.MinValue;
-        private readonly object _bufferLock = new();
+        private bool _downloadStarted;
+        private bool _extractionComplete;
+        private bool _disposed;
+
+        // Performance throttling: Only update UI thread 10 times per second maximum (100ms)
+        private DateTime _lastUiUpdate = DateTime.MinValue;
 
         public event EventHandler<ProgressEventArgs>? OnProgressUpdate;
         public event EventHandler<CompleteEventArgs>? OnDownloadComplete;
@@ -30,16 +32,25 @@ namespace YTDLPHost.Services
         public async Task ExecuteAsync(DownloadTask task)
         {
             _errorBuffer.Clear();
-            _recentOutput.Clear();
+            _downloadStarted = false;
+            _extractionComplete = false;
+            task.ClearLog();
+
+            task.AppendLog("=== Download Task Started ===");
+            task.AppendLog($"Original Payload: {task.UrlPayload}");
+            task.AppendLog($"Command: yt-dlp.exe {task.Command}");
+            task.AppendLog("");
 
             try
             {
                 var command = task.Command;
                 var saveDirectory = ExtractSaveDirectory(command);
 
+                // Dynamically inject cookie file path if Bypass was enabled
                 if (!string.IsNullOrEmpty(task.CookieFilePath) && File.Exists(task.CookieFilePath))
                 {
                     command += $" --cookies \"{task.CookieFilePath}\"";
+                    task.AppendLog($"[DEBUG] Injection: Cookies appended from {task.CookieFilePath}");
                 }
 
                 var psi = new ProcessStartInfo
@@ -57,7 +68,7 @@ namespace YTDLPHost.Services
 
                 _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
                 _process.OutputDataReceived += (s, e) => HandleOutput(e.Data, task);
-                _process.ErrorDataReceived += (s, e) => HandleError(e.Data);
+                _process.ErrorDataReceived += (s, e) => HandleError(e.Data, task);
 
                 var tcs = new TaskCompletionSource<bool>();
                 _process.Exited += (s, e) => tcs.TrySetResult(true);
@@ -68,63 +79,52 @@ namespace YTDLPHost.Services
 
                 await tcs.Task;
 
+                if (_disposed) return; // Ignore if task was cancelled
+
                 if (_process.ExitCode == 0)
                 {
                     task.Status = DownloadStatus.Completed;
                     task.Progress = 100.0;
                     task.CompletedAt = DateTime.Now;
-                    task.Speed = string.Empty;
+                    task.Speed = "";
                     task.Eta = "Done";
-
-                    string finalOutputString;
-                    lock (_bufferLock)
-                    {
-                        finalOutputString = _recentOutput.ToString();
-                    }
-
-                    if (string.IsNullOrEmpty(task.OutputPath))
-                    {
-                        var destLine = finalOutputString.Split('\n')
-                            .LastOrDefault(l => l.Contains("Destination:", StringComparison.OrdinalIgnoreCase));
-                        if (destLine != null)
-                        {
-                            var match = Regex.Match(destLine, @"Destination:\s+(.+)");
-                            if (match.Success)
-                            {
-                                task.OutputPath = match.Groups[1].Value.Trim();
-                                task.FileName = Path.GetFileName(task.OutputPath);
-                                if (!string.IsNullOrEmpty(task.FileName) && task.Title == "Unknown")
-                                    task.Title = task.FileName;
-                            }
-                        }
-                    }
+                    task.AppendLog("");
+                    task.AppendLog("=== Download Finished Successfully ===");
 
                     OnDownloadComplete?.Invoke(this, new CompleteEventArgs(task.Id, task.OutputPath, task.Title));
                 }
                 else
                 {
-                    var lastErrors = string.Join("\n", _errorBuffer.ToString()
+                    string lastErrors = string.Join("\n", _errorBuffer.ToString()
                         .Split('\n')
                         .Where(l => !string.IsNullOrWhiteSpace(l))
                         .TakeLast(3));
 
                     task.Status = DownloadStatus.Error;
                     task.ErrorMessage = string.IsNullOrWhiteSpace(lastErrors)
-                        ? "Download failed. Check yt-dlp output for details."
+                        ? $"Download failed (Code: {_process.ExitCode}). Check full logs for details."
                         : lastErrors;
+                    
+                    task.AppendLog("");
+                    task.AppendLog($"=== ERROR (Code: {_process.ExitCode}) ===");
+                    task.AppendLog(task.ErrorMessage);
 
                     OnDownloadError?.Invoke(this, new DownloadErrorEventArgs(task.Id, task.ErrorMessage));
                 }
             }
             catch (Exception ex)
             {
+                if (_disposed) return;
                 task.Status = DownloadStatus.Error;
                 task.ErrorMessage = $"Execution error: {ex.Message}";
+                task.AppendLog($"[DEBUG] Critical Exception: {ex.Message}");
                 OnDownloadError?.Invoke(this, new DownloadErrorEventArgs(task.Id, task.ErrorMessage));
             }
             finally
             {
+                task.AppendLog($"=== Log End {DateTime.Now} ===");
                 CleanupProcess();
+                SaveLogsToDisk(task);
             }
         }
 
@@ -132,96 +132,110 @@ namespace YTDLPHost.Services
         {
             if (string.IsNullOrWhiteSpace(data)) return;
 
-            lock (_bufferLock)
+            // 1. Capture preliminary logs immediately for the UI log box
+            task.AppendLog(data);
+
+            bool needsUiUpdate = false;
+            double oldProgress = task.Progress;
+
+            // 2. Set Status = Downloading immediately so user knows something is happening
+            if (!_extractionComplete && (data.Contains("[youtube]") || data.Contains("[info]")))
             {
-                _recentOutput.AppendLine(data);
-                if (_recentOutput.Length > 10000)
+                _extractionComplete = true;
+                if (task.Status != DownloadStatus.Downloading)
                 {
-                    var text = _recentOutput.ToString();
-                    _recentOutput.Clear();
-                    _recentOutput.Append(text.Substring(text.Length - 5000));
+                    task.Status = DownloadStatus.Downloading;
+                    needsUiUpdate = true;
                 }
             }
 
-            // Perform Regex calculations safely on the background thread
-            bool needsUiUpdate = false;
-            DownloadStatus newStatus = task.Status;
-            double newProgress = task.Progress;
-            string newSpeed = task.Speed;
-            string newEta = task.Eta;
-            string newOutputPath = task.OutputPath;
-            string newTitle = task.Title;
-
-            if (newStatus != DownloadStatus.Downloading)
-            {
-                newStatus = DownloadStatus.Downloading;
-                needsUiUpdate = true;
-            }
-
+            // 3. Regular progress bar updates [download]
             if (data.Contains("[download]"))
             {
-                var percentMatch = Regex.Match(data, @"\[download\]\s+(?:(\d+\.?\d*)%|100%)");
-                if (percentMatch.Success)
+                _downloadStarted = true;
+                if (task.Status != DownloadStatus.Downloading)
                 {
-                    newProgress = double.TryParse(percentMatch.Groups[1].Value, out var percent) ? Math.Min(percent, 100.0) : 100.0;
+                    task.Status = DownloadStatus.Downloading;
                     needsUiUpdate = true;
                 }
 
-                var speedMatch = Regex.Match(data, @"at\s+([\d\.]+[KMG]iB/s)");
-                if (speedMatch.Success) { newSpeed = speedMatch.Groups[1].Value; needsUiUpdate = true; }
+                // Match percentage (e.g., 25.5% or 100%)
+                var percentMatch = Regex.Match(data, @"\[download\]\s+(?:(\d+\.?\d*)%|100%)");
+                if (percentMatch.Success)
+                {
+                    if (double.TryParse(percentMatch.Groups[1].Value, out var percent))
+                    {
+                        task.Progress = Math.Min(percent, 100.0);
+                    }
+                    else if (data.Contains("100%"))
+                    {
+                        task.Progress = 100.0;
+                    }
+                    if (task.Progress > oldProgress) needsUiUpdate = true;
+                }
 
+                // Match speed
+                var speedMatch = Regex.Match(data, @"at\s+([\d\.]+[KMG]iB/s)");
+                if (speedMatch.Success) { task.Speed = speedMatch.Groups[1].Value; needsUiUpdate = true; }
+
+                // Match ETA
                 var etaMatch = Regex.Match(data, @"ETA\s+([\d:]+)");
-                if (etaMatch.Success) { newEta = etaMatch.Groups[1].Value; needsUiUpdate = true; }
+                if (etaMatch.Success) { task.Eta = etaMatch.Groups[1].Value; needsUiUpdate = true; }
             }
 
+            // 4. Extract real final file path/title when available
             if (data.Contains("Destination:", StringComparison.OrdinalIgnoreCase))
             {
                 var destMatch = Regex.Match(data, @"Destination:\s+(.+)");
                 if (destMatch.Success)
                 {
-                    newOutputPath = destMatch.Groups[1].Value.Trim();
-                    string tempFileName = Path.GetFileName(newOutputPath);
-                    if (!string.IsNullOrEmpty(tempFileName) && newTitle == "Unknown") newTitle = tempFileName;
-                    OnInfoExtracted?.Invoke(this, new ExtractedInfoEventArgs(task.Id, newTitle, newOutputPath));
-                    needsUiUpdate = true;
+                    task.OutputPath = destMatch.Groups[1].Value.Trim();
+                    string tempFileName = Path.GetFileName(task.OutputPath);
+                    if (!string.IsNullOrEmpty(tempFileName) && task.Title == "Unknown")
+                        task.Title = tempFileName;
+                    
+                    // Signal MainViewModel to update the DisplayTitle
+                    OnInfoExtracted?.Invoke(this, new ExtractedInfoEventArgs(task.Id, task.Title, task.OutputPath));
                 }
             }
 
-            // Push ALL calculated UI updates safely to the main Dispatcher thread at once
+            // 5. Detect Merger / Post-Processor Output Path
+            if ((data.Contains("[Merger]") || data.Contains("[ExtractAudio]") || data.Contains("[MoveFiles]")) 
+                && data.Contains("Destination:"))
+            {
+                var destMatch = Regex.Match(data, @"Destination:\s+(.+)");
+                if (destMatch.Success)
+                {
+                    task.OutputPath = destMatch.Groups[1].Value.Trim();
+                    string tempFileName = Path.GetFileName(task.OutputPath);
+                    if (!string.IsNullOrEmpty(tempFileName) && task.Title == "Unknown")
+                        task.Title = tempFileName;
+                }
+            }
+
+            // PERFORMANCE THROTTLING: Avoid overloading the WPF dispatcher thread
             if (needsUiUpdate)
             {
                 var now = DateTime.Now;
-                if ((now - _lastUpdate).TotalMilliseconds >= 100 || newProgress >= 100.0)
+                if ((now - _lastUiUpdate).TotalMilliseconds >= 100 || task.Progress >= 100.0)
                 {
-                    _lastUpdate = now;
-                    System.Windows.Application.Current?.Dispatcher.BeginInvoke(() =>
-                    {
-                        task.Status = newStatus;
-                        task.Progress = newProgress;
-                        task.Speed = newSpeed;
-                        task.Eta = newEta;
-                        task.OutputPath = newOutputPath;
-                        task.Title = newTitle;
-                    });
-                    
-                    OnProgressUpdate?.Invoke(this, new ProgressEventArgs(task.Id, newProgress, newSpeed, newEta));
+                    _lastUiUpdate = now;
+                    // Signal the progress change event, which leads to `vm.Refresh()` bounded to UI thread
+                    OnProgressUpdate?.Invoke(this, new ProgressEventArgs(task.Id, task.Progress, task.Speed, task.Eta));
                 }
             }
         }
 
-        private void HandleError(string? data)
+        private void HandleError(string? data, DownloadTask task)
         {
-            if (!string.IsNullOrWhiteSpace(data))
-            {
-                lock (_bufferLock)
-                {
-                    _errorBuffer.AppendLine(data);
-                }
-            }
+            if (string.IsNullOrWhiteSpace(data)) return;
+            _errorBuffer.AppendLine(data);
+            task.AppendLog($"[stderr] {data}");
         }
 
         private static string ExtractSaveDirectory(string command)
         {
+            // Try to find save path template -o
             var match = Regex.Match(command, @"-o\s+""([^""]+)""");
             if (match.Success)
             {
@@ -230,24 +244,55 @@ namespace YTDLPHost.Services
                 if (!string.IsNullOrEmpty(dir))
                 {
                     dir = Environment.ExpandEnvironmentVariables(dir);
-                    if (Directory.Exists(dir))
-                        return dir;
+                    if (Directory.Exists(dir)) return dir;
                 }
             }
 
+            // Try to find fixed base path -P
             match = Regex.Match(command, @"-P\s+""([^""]+)""");
             if (match.Success)
             {
                 var dir = Environment.ExpandEnvironmentVariables(match.Groups[1].Value);
-                if (Directory.Exists(dir))
-                    return dir;
+                if (Directory.Exists(dir)) return dir;
             }
 
+            // Default to Windows user profile Downloads or Documents
+            string downloadsPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+            if (Directory.Exists(downloadsPath)) return downloadsPath;
+            
             return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        }
+
+        private void SaveLogsToDisk(DownloadTask task)
+        {
+            if (string.IsNullOrWhiteSpace(task.OutputPath)) return;
+
+            string saveDir = Path.GetDirectoryName(task.OutputPath) ?? "";
+            if (!Directory.Exists(saveDir)) return;
+
+            try
+            {
+                string baseFileName = Path.GetFileNameWithoutExtension(task.FileName);
+                if (string.IsNullOrWhiteSpace(baseFileName)) baseFileName = Path.GetFileNameWithoutExtension(task.OutputPath);
+                if (string.IsNullOrWhiteSpace(baseFileName)) baseFileName = task.Title;
+
+                string sanitizedTitle = Regex.Replace(baseFileName, @"[^\w\-\.]", "_");
+                string logFileName = $"{sanitizedTitle}.log";
+                string finalLogPath = Path.Combine(saveDir, logFileName);
+
+                File.WriteAllText(finalLogPath, task.FullLogText, Encoding.UTF8);
+                task.AppendLog($"[INFO] Full logs saved to: {finalLogPath}");
+                task.LogFileSaved = true;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Failed to save merged log to disk: {ex.Message}");
+            }
         }
 
         public void Cancel()
         {
+            _disposed = true;
             try
             {
                 _cts.Cancel();
@@ -279,6 +324,7 @@ namespace YTDLPHost.Services
 
         public void Dispose()
         {
+            if (_disposed) return;
             Cancel();
             CleanupProcess();
             _cts.Dispose();
