@@ -26,6 +26,10 @@ namespace YTDLPHost.ViewModels
         public bool IsActive => Task.Status == DownloadStatus.Downloading || Task.Status == DownloadStatus.Queued;
         public bool HasError => Task.Status == DownloadStatus.Error;
         public bool IsCancellable => Task.Status == DownloadStatus.Downloading || Task.Status == DownloadStatus.Queued;
+        
+        // NEW: Property to determine if we can resume the download
+        public bool IsResumable => Task.Status == DownloadStatus.Cancelled || Task.Status == DownloadStatus.Error;
+        
         public string ErrorMessage => Task.ErrorMessage;
         public double Progress => Task.Progress;
 
@@ -35,7 +39,6 @@ namespace YTDLPHost.ViewModels
         {
             Task = task;
             
-            // Relay properties change notification from model to view
             Task.PropertyChanged += (s, e) =>
             {
                 if (e.PropertyName == nameof(Task.Status))
@@ -44,6 +47,7 @@ namespace YTDLPHost.ViewModels
                     OnPropertyChanged(nameof(IsActive));
                     OnPropertyChanged(nameof(HasError));
                     OnPropertyChanged(nameof(IsCancellable));
+                    OnPropertyChanged(nameof(IsResumable));
                     OnPropertyChanged(nameof(ProgressDisplay));
                 }
                 else if (e.PropertyName == nameof(Task.Speed) || e.PropertyName == nameof(Task.Eta))
@@ -71,10 +75,9 @@ namespace YTDLPHost.ViewModels
             ToggleLogCommand = new RelayCommand(() => IsLogVisible = !IsLogVisible);
         }
 
-        // Triggered by MainViewModel Dispatcher BeginInvoke to force UI redraw
         public void Refresh()
         {
-            OnPropertyChanged(string.Empty); // Signals all properties changed
+            OnPropertyChanged(string.Empty);
         }
     }
 }
