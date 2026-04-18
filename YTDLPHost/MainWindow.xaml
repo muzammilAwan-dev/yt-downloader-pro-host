@@ -182,6 +182,7 @@
                     <ProgressBar Grid.Row="2"
                                  Style="{StaticResource DownloadProgressBar}"
                                  Value="{Binding Progress, Mode=OneWay}"
+                                 IsIndeterminate="{Binding Task.IsIndeterminate, Mode=OneWay}"
                                  Maximum="100"
                                  Margin="22,8,0,0"
                                  Visibility="{Binding Task.Status, Converter={StaticResource BoolToVisibilityConverter}, ConverterParameter=invert}"/>
