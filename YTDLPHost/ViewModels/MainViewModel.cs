@@ -18,8 +18,6 @@ namespace YTDLPHost.ViewModels
     {
         private readonly TrayIconService _trayService;
         private readonly ObservableCollection<DownloadItemViewModel> _downloads = new();
-        
-        // CONCURRENT UPGRADE: Manager now holds up to 3 runners at once!
         private readonly Dictionary<Guid, YtDlpRunner> _activeRunners = new();
         private const int MaxConcurrentDownloads = 3; 
 
@@ -83,7 +81,6 @@ namespace YTDLPHost.ViewModels
             ShowWindowCommand = new RelayCommand(() => RequestShowWindow?.Invoke(this, EventArgs.Empty));
             ExitCommand = new RelayCommand(ExitApplication);
             
-            // FIXED: Physically tell the application window to minimize
             MinimizeToTrayCommand = new RelayCommand(() => 
             {
                 IsWindowVisible = false;
@@ -199,7 +196,6 @@ namespace YTDLPHost.ViewModels
             catch { }
         }
 
-        // CONCURRENT UPGRADE: Now processes up to 3 queue items at once!
         private async Task ProcessQueueAsync()
         {
             if (_isProcessingQueue) return;
@@ -222,7 +218,6 @@ namespace YTDLPHost.ViewModels
                     StatusText = $"Downloading: {next.DisplayTitle}";
                     UpdateActiveCount();
 
-                    // Fire and forget the runner so the loop can pick up the next concurrent task!
                     _ = StartDownloadTaskAsync(next);
                 }
 
@@ -253,8 +248,6 @@ namespace YTDLPHost.ViewModels
             _activeRunners.Remove(vm.Id);
 
             UpdateActiveCount();
-            
-            // Task finished, pull the next one from the queue automatically
             _ = ProcessQueueAsync();
         }
 
@@ -364,11 +357,14 @@ namespace YTDLPHost.ViewModels
             UpdateActiveCount();
         }
 
+        // FIXED: Bulletproof 3-step fallback logic for the Folder Icon
         private static void OpenFolder(DownloadItemViewModel? vm)
         {
-            if (vm?.Task?.OutputPath == null) return;
+            if (vm?.Task == null) return;
             var path = vm.Task.OutputPath;
-            if (File.Exists(path))
+
+            // 1. First attempt: Highlight the exact downloaded file
+            if (!string.IsNullOrEmpty(path) && File.Exists(path))
             {
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
                 {
@@ -376,20 +372,55 @@ namespace YTDLPHost.ViewModels
                     Arguments = $"/select,\"{path}\"",
                     UseShellExecute = true
                 });
+                return;
             }
-        }
 
-        private static void PlayFile(DownloadItemViewModel? vm)
-        {
-            if (vm?.Task?.OutputPath == null) return;
-            if (File.Exists(vm.Task.OutputPath))
+            // 2. Second attempt: Open the folder where the file was supposed to be
+            if (!string.IsNullOrEmpty(path))
+            {
+                var dir = Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = dir,
+                        UseShellExecute = true
+                    });
+                    return;
+                }
+            }
+
+            // 3. Absolute Fallback: Open the base save directory derived from the original command
+            var saveDir = ExtractSaveDirectory(vm.Task.Command);
+            if (Directory.Exists(saveDir))
             {
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
                 {
-                    FileName = vm.Task.OutputPath,
+                    FileName = saveDir,
                     UseShellExecute = true
                 });
             }
+        }
+
+        // FIXED: Bulletproof 2-step fallback logic for the Play Icon
+        private static void PlayFile(DownloadItemViewModel? vm)
+        {
+            if (vm?.Task == null) return;
+            var path = vm.Task.OutputPath;
+            
+            // 1. Try to play the exact file
+            if (!string.IsNullOrEmpty(path) && File.Exists(path))
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = path,
+                    UseShellExecute = true
+                });
+                return;
+            }
+
+            // 2. Fallback: If the exact file is missing, open the folder instead
+            OpenFolder(vm);
         }
 
         private void ClearCompleted()
@@ -442,6 +473,25 @@ namespace YTDLPHost.ViewModels
                     .Replace("%(title)s", "YouTube Video").Replace("%(uploader)s", "Channel");
             }
             return "YouTube Video";
+        }
+
+        private static string ExtractSaveDirectory(string command)
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(command, @"-o\s+""([^""]+)""");
+            if (match.Success)
+            {
+                var template = match.Groups[1].Value;
+                var dir = Path.GetDirectoryName(template);
+                if (!string.IsNullOrEmpty(dir))
+                {
+                    dir = Environment.ExpandEnvironmentVariables(dir);
+                    if (dir.StartsWith("~"))
+                        dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), dir.Substring(1).TrimStart('/', '\\'));
+                    if (Directory.Exists(dir))
+                        return dir;
+                }
+            }
+            return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         }
 
         private void ExitApplication()
