@@ -18,27 +18,28 @@ namespace YTDLPHost
 
         protected override void OnStartup(StartupEventArgs e)
         {
-            // HARDWARE ACCELERATION FIX: Force CPU rendering to prevent GPU driver crashes under heavy UI load
+            // HARDWARE ACCELERATION FIX: Prevents GPU driver crashes under heavy UI load
             RenderOptions.ProcessRenderMode = RenderMode.SoftwareOnly;
 
-            // 1. BULLETPROOFING: Catch all UI Thread Exceptions
+            // BULLETPROOFING: UI Thread Exception Handler
             this.DispatcherUnhandledException += (s, args) =>
             {
-                System.Windows.MessageBox.Show($"UI Thread Crash Prevented:\n\n{args.Exception.Message}", "Fatal Error Caught", MessageBoxButton.OK, MessageBoxImage.Error);
+                System.Windows.MessageBox.Show($"UI Thread Error: {args.Exception.Message}", "YT Downloader Pro - Error", MessageBoxButton.OK, MessageBoxImage.Error);
                 args.Handled = true; 
             };
 
-            // 2. BULLETPROOFING: Catch all Background Thread Exceptions
+            // BULLETPROOFING: Background Thread Exception Handler
             AppDomain.CurrentDomain.UnhandledException += (s, args) =>
             {
                 if (args.ExceptionObject is Exception ex)
                 {
-                    System.Windows.MessageBox.Show($"Background Thread Crash:\n\n{ex.Message}", "Fatal Error Caught", MessageBoxButton.OK, MessageBoxImage.Error);
+                    System.Windows.MessageBox.Show($"Background Thread Error: {ex.Message}", "YT Downloader Pro - Fatal Error", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             };
 
             base.OnStartup(e);
 
+            // Ensure protocol is registered on launch
             if (!ProtocolHandler.IsRegistered())
                 ProtocolHandler.Register();
 
@@ -47,9 +48,8 @@ namespace YTDLPHost
 
             if (!isFirstInstance)
             {
+                // Send the URL to the existing instance and shut down this one
                 var url = e.Args.FirstOrDefault() ?? "ytdlp://show";
-                
-                // 3. DEADLOCK FIX: Never use .Wait() on the UI thread. Use background tasks.
                 Task.Run(async () => 
                 {
                     await SingleInstanceManager.SendUrlToRunningInstanceAsync(url);
@@ -64,7 +64,9 @@ namespace YTDLPHost
 
             _mainWindow = new MainWindow { DataContext = _mainViewModel };
             _mainWindow.Closing += OnMainWindowClosing;
-            _mainWindow.StateChanged += OnMainWindowStateChanged;
+
+            // NOTE: OnMainWindowStateChanged removed to allow standard Taskbar minimization.
+            // Only the custom minimize button in MainWindow.xaml now triggers the Tray-hide.
 
             _mainWindow.Show();
             _mainWindow.Activate();
@@ -93,26 +95,22 @@ namespace YTDLPHost
         {
             if (_mainWindow == null) return;
             _mainWindow.Show();
-            if (_mainWindow.WindowState == WindowState.Minimized) _mainWindow.WindowState = WindowState.Normal;
+            // Restore window if it was minimized to the taskbar
+            if (_mainWindow.WindowState == WindowState.Minimized) 
+                _mainWindow.WindowState = WindowState.Normal;
+            
             _mainWindow.Activate();
             _mainWindow.Topmost = true;
             _mainWindow.Topmost = false;
+            _mainViewModel!.IsWindowVisible = true;
         }
 
         private void OnMainWindowClosing(object? sender, System.ComponentModel.CancelEventArgs e)
         {
+            // Intercept close button to hide to tray instead of exiting
             e.Cancel = true;
             _mainWindow?.Hide();
             _mainViewModel!.IsWindowVisible = false;
-        }
-
-        private void OnMainWindowStateChanged(object? sender, EventArgs e)
-        {
-            if (_mainWindow?.WindowState == WindowState.Minimized)
-            {
-                _mainWindow.Hide();
-                _mainViewModel!.IsWindowVisible = false;
-            }
         }
 
         protected override void OnExit(ExitEventArgs e)
