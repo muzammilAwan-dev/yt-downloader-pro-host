@@ -1,5 +1,6 @@
 using System;
-using System.ComponentModel;
+using System.IO;
+using System.Text;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace YTDLPHost.Models
@@ -20,69 +21,82 @@ namespace YTDLPHost.Models
         private Guid _id = Guid.NewGuid();
 
         [ObservableProperty]
-        private string _urlPayload = string.Empty;
-
-        [ObservableProperty]
-        private string _command = string.Empty;
-
-        [ObservableProperty]
-        private string? _cookiePayload;
-
-        [ObservableProperty]
-        private string _cookieFilePath = string.Empty;
-
-        [ObservableProperty]
-        private string _outputPath = string.Empty;
-
-        [ObservableProperty]
         private string _title = "Unknown";
+
+        [ObservableProperty]
+        private string _resolution = "";
+
+        [ObservableProperty]
+        private string _urlPayload = "";
+
+        [ObservableProperty]
+        private string _command = "";
+
+        [ObservableProperty]
+        private string _cookiePayload = "";
+
+        [ObservableProperty]
+        private string _cookieFilePath = "";
+
+        [ObservableProperty]
+        private double _progress = 0.0;
+
+        [ObservableProperty]
+        private string _speed = "";
+
+        [ObservableProperty]
+        private string _eta = "";
 
         [ObservableProperty]
         private DownloadStatus _status = DownloadStatus.Queued;
 
         [ObservableProperty]
-        [NotifyPropertyChangedFor(nameof(ProgressPercent))]
-        private double _progress = 0.0;
+        private string _errorMessage = "";
 
         [ObservableProperty]
-        private string _speed = string.Empty;
+        private string _outputPath = "";
 
         [ObservableProperty]
-        private string _eta = string.Empty;
+        private string _fileName = "";
 
         [ObservableProperty]
-        private string _resolution = string.Empty;
+        private DateTime _queuedAt = DateTime.Now;
 
         [ObservableProperty]
-        private string _errorMessage = string.Empty;
-
-        [ObservableProperty]
-        private DateTime _addedAt = DateTime.Now;
+        private DateTime? _startedAt;
 
         [ObservableProperty]
         private DateTime? _completedAt;
 
+        // Thread-safe logging structures
+        private readonly StringBuilder _logBuilder = new();
+        private readonly object _logLock = new();
+        
+        // MVVM property to expose the log text
         [ObservableProperty]
-        private string _fileName = string.Empty;
+        private string _fullLogText = "";
 
-        public int ProgressPercent => (int)_progress;
+        [ObservableProperty]
+        private bool _logFileSaved;
 
-        public string StatusText => Status switch
+        public void AppendLog(string? line)
         {
-            DownloadStatus.Queued => "Queued",
-            DownloadStatus.Downloading => "Downloading",
-            DownloadStatus.Paused => "Paused",
-            DownloadStatus.Completed => "Complete",
-            DownloadStatus.Error => "Error",
-            DownloadStatus.Cancelled => "Cancelled",
-            _ => "Unknown"
-        };
+            if (string.IsNullOrWhiteSpace(line)) return;
+            lock (_logLock)
+            {
+                _logBuilder.AppendLine(line);
+                FullLogText = _logBuilder.ToString();
+            }
+        }
 
-        public bool IsActive => Status == DownloadStatus.Queued || Status == DownloadStatus.Downloading;
-        public bool IsCompleted => Status == DownloadStatus.Completed;
-        public bool HasError => Status == DownloadStatus.Error;
-        public bool IsCancellable => Status == DownloadStatus.Queued || Status == DownloadStatus.Downloading;
-        public bool CanOpenFolder => Status == DownloadStatus.Completed && !string.IsNullOrEmpty(OutputPath);
-        public bool CanPlay => Status == DownloadStatus.Completed && !string.IsNullOrEmpty(OutputPath);
+        public void ClearLog()
+        {
+            lock (_logLock)
+            {
+                _logBuilder.Clear();
+                FullLogText = "";
+                LogFileSaved = false;
+            }
+        }
     }
 }
