@@ -19,7 +19,7 @@ namespace YTDLPHost
             // 1. BULLETPROOFING: Catch all UI Thread Exceptions
             this.DispatcherUnhandledException += (s, args) =>
             {
-                MessageBox.Show($"UI Thread Crash Prevented:\n\n{args.Exception.Message}", "Fatal Error Caught", MessageBoxButton.OK, MessageBoxImage.Error);
+                System.Windows.MessageBox.Show($"UI Thread Crash Prevented:\n\n{args.Exception.Message}", "Fatal Error Caught", MessageBoxButton.OK, MessageBoxImage.Error);
                 args.Handled = true; 
             };
 
@@ -28,7 +28,7 @@ namespace YTDLPHost
             {
                 if (args.ExceptionObject is Exception ex)
                 {
-                    MessageBox.Show($"Background Thread Crash:\n\n{ex.Message}", "Fatal Error Caught", MessageBoxButton.OK, MessageBoxImage.Error);
+                    System.Windows.MessageBox.Show($"Background Thread Crash:\n\n{ex.Message}", "Fatal Error Caught", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             };
 
