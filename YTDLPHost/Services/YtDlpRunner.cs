@@ -54,6 +54,7 @@ namespace YTDLPHost.Services
             try
             {
                 var saveDirectory = ExtractSaveDirectory(command);
+
                 if (!string.IsNullOrEmpty(task.CookieFilePath) && File.Exists(task.CookieFilePath))
                     command += $" --cookies \"{task.CookieFilePath}\"";
 
@@ -92,29 +93,49 @@ namespace YTDLPHost.Services
                     task.IsIndeterminate = false;
                     task.CurrentPhase = "Complete";
                     task.CompletedAt = DateTime.Now;
+                    task.Speed = "";
+                    task.Eta = "";
+                    task.AppendLog("=== Download Finished Successfully ===");
+
                     OnDownloadComplete?.Invoke(this, new CompleteEventArgs(task.Id, task.OutputPath, task.Title));
                 }
                 else
                 {
+                    string lastErrors = string.Join("\n", _errorBuffer.ToString()
+                        .Split('\n')
+                        .Where(l => !string.IsNullOrWhiteSpace(l))
+                        .TakeLast(3));
+
                     task.Status = DownloadStatus.Error;
-                    task.ErrorMessage = $"Failed (Code: {_process.ExitCode})";
+                    task.IsIndeterminate = false;
+                    task.ErrorMessage = string.IsNullOrWhiteSpace(lastErrors)
+                        ? $"Download failed (Code: {_process.ExitCode})"
+                        : lastErrors;
+
                     OnDownloadError?.Invoke(this, new DownloadErrorEventArgs(task.Id, task.ErrorMessage));
                 }
             }
             catch (Exception ex)
             {
+                if (_disposed) return;
                 task.Status = DownloadStatus.Error;
-                task.ErrorMessage = ex.Message;
-                OnDownloadError?.Invoke(this, new DownloadErrorEventArgs(task.Id, ex.Message));
+                task.ErrorMessage = $"Execution error: {ex.Message}";
+                OnDownloadError?.Invoke(this, new DownloadErrorEventArgs(task.Id, task.ErrorMessage));
             }
-            finally { CleanupProcess(); SaveLogsToDisk(task); }
+            finally
+            {
+                CleanupProcess();
+                SaveLogsToDisk(task);
+            }
         }
 
         private void HandleOutput(string? data, DownloadTask task)
         {
             if (string.IsNullOrWhiteSpace(data)) return;
+
             task.AppendLog(data);
             bool needsUiUpdate = false;
+            double oldProgress = task.Progress;
 
             var fileTrackMatch = FileTrackerRegex.Match(data);
             if (fileTrackMatch.Success)
@@ -123,14 +144,15 @@ namespace YTDLPHost.Services
                 if (!string.IsNullOrWhiteSpace(path)) task.TrackedFiles.Add(path);
             }
 
-            // Phase updates
+            // Phase Trackers
             if (data.Contains("Writing video subtitles", StringComparison.OrdinalIgnoreCase))
             {
                 task.CurrentPhase = "Downloading Subtitles...";
                 task.IsIndeterminate = true;
                 needsUiUpdate = true;
             }
-            else if (data.Contains("Downloading video thumbnail", StringComparison.OrdinalIgnoreCase))
+            else if (data.Contains("Downloading video thumbnail", StringComparison.OrdinalIgnoreCase) || 
+                     data.Contains("Writing video thumbnail", StringComparison.OrdinalIgnoreCase))
             {
                 task.CurrentPhase = "Downloading Thumbnail...";
                 task.IsIndeterminate = true;
@@ -142,16 +164,41 @@ namespace YTDLPHost.Services
                 task.IsIndeterminate = true;
                 needsUiUpdate = true;
             }
+            else if (data.Contains("[ExtractAudio]", StringComparison.OrdinalIgnoreCase))
+            {
+                task.CurrentPhase = "Converting Audio...";
+                task.IsIndeterminate = true;
+                needsUiUpdate = true;
+            }
+
+            if (data.Contains("[download] Downloading item"))
+            {
+                var match = PlaylistRegex.Match(data);
+                if (match.Success)
+                {
+                    task.PlaylistInfo = $"Item {match.Groups[1].Value}/{match.Groups[2].Value}";
+                    needsUiUpdate = true;
+                }
+            }
 
             if (data.Contains("[download]") && data.Contains("%"))
             {
-                task.IsIndeterminate = false;
+                task.IsIndeterminate = false; 
 
-                // FIX: Transition from Thumbnail/Subtitle text to Video download text
-                if (task.CurrentPhase == "Downloading Thumbnail..." || task.CurrentPhase == "Downloading Subtitles...")
+                // GHOST PHASE FIX: Switch from Thumbnail/Subs to main Video download
+                if (task.CurrentPhase == "Downloading Thumbnail..." || 
+                    task.CurrentPhase == "Downloading Subtitles..." || 
+                    task.CurrentPhase == "Extracting Info..." || 
+                    task.CurrentPhase == "Starting...")
                 {
                     task.CurrentPhase = "Downloading Video...";
-                    task.FileSize = ""; // Reset size to capture real media size
+                    task.FileSize = ""; // Reset size to capture the true video size
+                    needsUiUpdate = true;
+                }
+                
+                if (task.Status != DownloadStatus.Downloading)
+                {
+                    task.Status = DownloadStatus.Downloading;
                     needsUiUpdate = true;
                 }
 
@@ -166,13 +213,14 @@ namespace YTDLPHost.Services
                 if (percentMatch.Success && double.TryParse(percentMatch.Groups[1].Value, out var percent))
                 {
                     percent = Math.Min(percent, 100.0);
+                    // Stream Transition (Video -> Audio)
                     if (percent < task.Progress && task.Progress >= 90.0 && task.CurrentPhase == "Downloading Video...")
                     {
                         task.CurrentPhase = "Downloading Audio...";
                         task.FileSize = ""; 
                     }
                     task.Progress = percent;
-                    needsUiUpdate = true;
+                    if (task.Progress != oldProgress) needsUiUpdate = true;
                 }
 
                 var speedMatch = SpeedRegex.Match(data);
@@ -182,13 +230,14 @@ namespace YTDLPHost.Services
                 if (etaMatch.Success) { task.Eta = etaMatch.Groups[1].Value; needsUiUpdate = true; }
             }
 
-            if (data.Contains("Destination:", StringComparison.OrdinalIgnoreCase) && !data.Contains("[Merger]"))
+            if (data.Contains("Destination:", StringComparison.OrdinalIgnoreCase) && !data.Contains("[Merger]") && !data.Contains("[ExtractAudio]"))
             {
                 var destMatch = FileTrackerRegex.Match(data);
                 if (destMatch.Success)
                 {
                     task.OutputPath = destMatch.Groups[1].Value.Trim();
                     string clean = Path.GetFileNameWithoutExtension(task.OutputPath);
+                    [cite_start]// Strip format tags like .f398 or .vtt from UI title [cite: 3]
                     clean = Regex.Replace(clean, @"\.(f\w+|en-orig|en|vtt|webp|jpg)$", "", RegexOptions.IgnoreCase);
 
                     if (!string.IsNullOrEmpty(clean) && (task.Title.Contains("Fetching") || task.Title == "Unknown"))
@@ -199,10 +248,12 @@ namespace YTDLPHost.Services
                 }
             }
 
-            if (data.Contains("[Merger]") || data.Contains("[MoveFiles]"))
+            if (data.Contains("[Merger]") || data.Contains("[MoveFiles]") || data.Contains("Fixing MPEG-TS"))
             {
                 task.CurrentPhase = "Merging & Finalizing...";
                 task.IsIndeterminate = true;
+                task.Speed = "";
+                task.Eta = "";
                 needsUiUpdate = true;
             }
 
@@ -217,9 +268,48 @@ namespace YTDLPHost.Services
             }
         }
 
-        private void CleanupProcess() { try { if (_process != null && !_process.HasExited) _process.Kill(true); _process?.Dispose(); } catch { } }
-        private void SaveLogsToDisk(DownloadTask task) { /* Existing logging logic */ }
-        private static string ExtractSaveDirectory(string cmd) { /* Existing logic */ return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile); }
+        private void SaveLogsToDisk(DownloadTask task)
+        {
+            if (string.IsNullOrWhiteSpace(task.OutputPath)) return;
+            try
+            {
+                string saveDir = Path.GetDirectoryName(task.OutputPath) ?? "";
+                string logDir = Path.Combine(saveDir, "YTDLP-Video-logs");
+                if (!Directory.Exists(logDir)) Directory.CreateDirectory(logDir);
+
+                string fileName = Path.GetFileNameWithoutExtension(task.OutputPath);
+                string logPath = Path.Combine(logDir, $"{Regex.Replace(fileName, @"[^\w\.]", "_")}.log");
+                File.WriteAllText(logPath, task.FullLogText, Encoding.UTF8);
+                task.LogFileSaved = true;
+            }
+            catch { }
+        }
+
+        private static string ExtractSaveDirectory(string command)
+        {
+            var match = OutputTemplateRegex.Match(command);
+            if (match.Success)
+            {
+                var dir = Path.GetDirectoryName(match.Groups[1].Value);
+                if (!string.IsNullOrEmpty(dir))
+                {
+                    dir = Environment.ExpandEnvironmentVariables(dir);
+                    if (Directory.Exists(dir)) return dir;
+                }
+            }
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+        }
+
+        private void HandleError(string? data, DownloadTask task)
+        {
+            if (!string.IsNullOrWhiteSpace(data)) _errorBuffer.AppendLine(data);
+        }
+
+        private void CleanupProcess()
+        {
+            try { if (_process != null && !_process.HasExited) _process.Kill(true); _process?.Dispose(); } catch { }
+        }
+
         public void Cancel() { _disposed = true; try { _cts.Cancel(); CleanupProcess(); } catch { } }
         public void Dispose() { Cancel(); _cts.Dispose(); }
     }
