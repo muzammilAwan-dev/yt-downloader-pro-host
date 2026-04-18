@@ -2,6 +2,8 @@ using System;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Threading;
 using YTDLPHost.Services;
 using YTDLPHost.ViewModels;
@@ -16,6 +18,9 @@ namespace YTDLPHost
 
         protected override void OnStartup(StartupEventArgs e)
         {
+            // HARDWARE ACCELERATION FIX: Force CPU rendering to prevent GPU driver crashes under heavy UI load
+            RenderOptions.ProcessRenderMode = RenderMode.SoftwareOnly;
+
             // 1. BULLETPROOFING: Catch all UI Thread Exceptions
             this.DispatcherUnhandledException += (s, args) =>
             {
