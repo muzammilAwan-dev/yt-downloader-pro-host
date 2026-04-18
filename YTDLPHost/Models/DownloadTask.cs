@@ -59,6 +59,16 @@ namespace YTDLPHost.Models
         [ObservableProperty]
         private string _fileName = "";
 
+        // NEW: UI state trackers for audio/video/merge phases and playlists
+        [ObservableProperty]
+        private string _currentPhase = "Starting...";
+
+        [ObservableProperty]
+        private bool _isIndeterminate = false;
+
+        [ObservableProperty]
+        private string _playlistInfo = "";
+
         [ObservableProperty]
         private DateTime _queuedAt = DateTime.Now;
 
@@ -68,11 +78,9 @@ namespace YTDLPHost.Models
         [ObservableProperty]
         private DateTime? _completedAt;
 
-        // Thread-safe logging structures
         private readonly StringBuilder _logBuilder = new();
         private readonly object _logLock = new();
         
-        // MVVM property to expose the log text
         [ObservableProperty]
         private string _fullLogText = "";
 
