@@ -176,8 +176,7 @@
                                      IsReadOnly="True"
                                      TextWrapping="Wrap"
                                      FontSize="11"
-                                     FontFamily="Consolas, Monospace"
-                                     TextChanged="LogTextBox_TextChanged"/>
+                                     FontFamily="Consolas, Monospace"/>
                         </ScrollViewer>
                     </Border>
                     
@@ -227,9 +226,9 @@
                 Padding="20,14">
             <Grid>
                 <Grid.ColumnDefinitions>
-                    <Definition Width="Auto"/>
-                    <Definition Width="*"/>
-                    <Definition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
