@@ -214,6 +214,17 @@ namespace YTDLPHost.Services
                     needsUiUpdate = true;
                 }
 
+                // [FIX APPLIED] GHOST PHASE FIX: Switch from pre-download phases to main Video download and reset size
+                if (task.CurrentPhase == "Downloading Thumbnail..." || 
+                    task.CurrentPhase == "Downloading Subtitles..." || 
+                    task.CurrentPhase == "Extracting Info..." || 
+                    task.CurrentPhase == "Starting...")
+                {
+                    task.CurrentPhase = "Downloading Video...";
+                    task.FileSize = ""; // Reset size to capture real media size
+                    needsUiUpdate = true;
+                }
+
                 var sizeMatch = SizeRegex.Match(data);
                 if (sizeMatch.Success && string.IsNullOrEmpty(task.FileSize)) 
                 { 
@@ -227,14 +238,10 @@ namespace YTDLPHost.Services
                     if (double.TryParse(percentMatch.Groups[1].Value, out var percent))
                     {
                         percent = Math.Min(percent, 100.0);
-                        if (percent < task.Progress && task.Progress >= 99.0)
+                        if (percent < task.Progress && task.Progress >= 90.0 && task.CurrentPhase == "Downloading Video...")
                         {
                             task.CurrentPhase = "Downloading Audio...";
                             task.FileSize = ""; 
-                        }
-                        else if (task.CurrentPhase == "Extracting Info..." || task.CurrentPhase == "Starting...")
-                        {
-                            task.CurrentPhase = "Downloading Video...";
                         }
                         
                         task.Progress = percent;
@@ -259,6 +266,7 @@ namespace YTDLPHost.Services
                     task.OutputPath = destMatch.Groups[1].Value.Trim();
                     string cleanTitle = Path.GetFileNameWithoutExtension(task.OutputPath);
                     
+                    // [FIX APPLIED] FORMAT TAG STRIPPING: Remove tags like .f251 or .en from UI
                     cleanTitle = Regex.Replace(cleanTitle, @"\.(f\w+|en-orig|en|vtt|webp|jpg)$", "", RegexOptions.IgnoreCase);
 
                     if (!string.IsNullOrEmpty(cleanTitle) && 
