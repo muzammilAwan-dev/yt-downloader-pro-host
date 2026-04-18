@@ -18,9 +18,6 @@ namespace YTDLPHost
         {
             base.OnStartup(e);
 
-            // Check if yt-dlp is available
-            CheckYtDlpPresence();
-
             // Register protocol handler if needed
             if (!ProtocolHandler.IsRegistered())
             {
@@ -37,12 +34,10 @@ namespace YTDLPHost
                 var url = e.Args.FirstOrDefault();
                 if (!string.IsNullOrEmpty(url))
                 {
-                    // FIXED: Block and Wait for the pipe to send the message before shutting down
                     SingleInstanceManager.SendUrlToRunningInstanceAsync(url).Wait(3000);
                 }
                 else
                 {
-                    // FIXED: Block and Wait for the pipe to send the message before shutting down
                     SingleInstanceManager.SendUrlToRunningInstanceAsync("ytdlp://show").Wait(3000);
                 }
 
@@ -137,41 +132,6 @@ namespace YTDLPHost
             _mainViewModel?.Dispose();
             _singleInstanceManager?.Dispose();
             base.OnExit(e);
-        }
-
-        private static void CheckYtDlpPresence()
-        {
-            try
-            {
-                var psi = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = "yt-dlp.exe",
-                    Arguments = "--version",
-                    CreateNoWindow = true,
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true
-                };
-
-                using var proc = System.Diagnostics.Process.Start(psi);
-                if (proc == null) return;
-                proc.WaitForExit(5000);
-
-                if (proc.ExitCode != 0)
-                {
-                    // FIXED: Added System.Windows explicitly to resolve the ambiguous reference
-                    System.Windows.MessageBox.Show(
-                        "yt-dlp.exe was found but returned an error.\n\n" +
-                        "Please ensure yt-dlp is correctly installed.",
-                        "YT Downloader Pro - Warning",
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Warning);
-                }
-            }
-            catch (System.ComponentModel.Win32Exception)
-            {
-                // yt-dlp not found - will show dialog in MainViewModel
-            }
         }
     }
 }
