@@ -16,6 +16,9 @@ namespace YTDLPHost.Services
         private readonly CancellationTokenSource _cts = new();
         private readonly StringBuilder _errorBuffer = new();
         private readonly StringBuilder _recentOutput = new();
+        
+        private DateTime _lastUpdate = DateTime.MinValue;
+        private readonly object _bufferLock = new();
 
         public event EventHandler<ProgressEventArgs>? OnProgressUpdate;
         public event EventHandler<CompleteEventArgs>? OnDownloadComplete;
@@ -73,9 +76,15 @@ namespace YTDLPHost.Services
                     task.Speed = string.Empty;
                     task.Eta = "Done";
 
+                    string finalOutputString;
+                    lock (_bufferLock)
+                    {
+                        finalOutputString = _recentOutput.ToString();
+                    }
+
                     if (string.IsNullOrEmpty(task.OutputPath))
                     {
-                        var destLine = _recentOutput.ToString().Split('\n')
+                        var destLine = finalOutputString.Split('\n')
                             .LastOrDefault(l => l.Contains("Destination:", StringComparison.OrdinalIgnoreCase));
                         if (destLine != null)
                         {
@@ -123,18 +132,23 @@ namespace YTDLPHost.Services
         {
             if (string.IsNullOrWhiteSpace(data)) return;
 
-            _recentOutput.AppendLine(data);
-            if (_recentOutput.Length > 10000)
+            lock (_bufferLock)
             {
-                var text = _recentOutput.ToString();
-                _recentOutput.Clear();
-                _recentOutput.Append(text.Substring(text.Length - 5000));
+                _recentOutput.AppendLine(data);
+                if (_recentOutput.Length > 10000)
+                {
+                    var text = _recentOutput.ToString();
+                    _recentOutput.Clear();
+                    _recentOutput.Append(text.Substring(text.Length - 5000));
+                }
             }
 
             if (task.Status != DownloadStatus.Downloading)
             {
                 task.Status = DownloadStatus.Downloading;
             }
+
+            bool needsUiUpdate = false;
 
             if (data.Contains("[download]"))
             {
@@ -149,27 +163,28 @@ namespace YTDLPHost.Services
                     {
                         task.Progress = 100.0;
                     }
-                    OnProgressUpdate?.Invoke(this, new ProgressEventArgs(task.Id, task.Progress, task.Speed, task.Eta));
+                    needsUiUpdate = true;
                 }
 
                 var speedMatch = Regex.Match(data, @"at\s+([\d\.]+[KMG]iB/s)");
                 if (speedMatch.Success)
                 {
                     task.Speed = speedMatch.Groups[1].Value;
+                    needsUiUpdate = true;
                 }
 
                 var etaMatch = Regex.Match(data, @"ETA\s+([\d:]+)");
                 if (etaMatch.Success)
                 {
                     task.Eta = etaMatch.Groups[1].Value;
+                    needsUiUpdate = true;
                 }
 
                 if (data.Contains("100%") || data.Contains("100.0%"))
                 {
                     task.Progress = 100.0;
+                    needsUiUpdate = true;
                 }
-
-                OnProgressUpdate?.Invoke(this, new ProgressEventArgs(task.Id, task.Progress, task.Speed, task.Eta));
             }
 
             if (data.Contains("Destination:", StringComparison.OrdinalIgnoreCase))
@@ -197,13 +212,26 @@ namespace YTDLPHost.Services
                         task.Title = task.FileName;
                 }
             }
+
+            if (needsUiUpdate)
+            {
+                var now = DateTime.Now;
+                if ((now - _lastUpdate).TotalMilliseconds >= 100 || task.Progress >= 100.0)
+                {
+                    _lastUpdate = now;
+                    OnProgressUpdate?.Invoke(this, new ProgressEventArgs(task.Id, task.Progress, task.Speed, task.Eta));
+                }
+            }
         }
 
         private void HandleError(string? data)
         {
             if (!string.IsNullOrWhiteSpace(data))
             {
-                _errorBuffer.AppendLine(data);
+                lock (_bufferLock)
+                {
+                    _errorBuffer.AppendLine(data);
+                }
             }
         }
 
