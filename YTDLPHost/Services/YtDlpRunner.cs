@@ -257,9 +257,15 @@ namespace YTDLPHost.Services
                 if (destMatch.Success)
                 {
                     task.OutputPath = destMatch.Groups[1].Value.Trim();
-                    string tempFileName = Path.GetFileName(task.OutputPath);
-                    if (!string.IsNullOrEmpty(tempFileName) && task.Title == "Unknown")
-                        task.Title = tempFileName;
+                    string cleanTitle = Path.GetFileNameWithoutExtension(task.OutputPath);
+                    
+                    cleanTitle = Regex.Replace(cleanTitle, @"\.(f\w+|en-orig|en|vtt|webp|jpg)$", "", RegexOptions.IgnoreCase);
+
+                    if (!string.IsNullOrEmpty(cleanTitle) && 
+                       (task.Title.Contains("Fetching Title") || task.Title.Contains("YouTube Video") || task.Title == "Unknown"))
+                    {
+                        task.Title = cleanTitle;
+                    }
                     
                     OnInfoExtracted?.Invoke(this, new ExtractedInfoEventArgs(task.Id, task.Title, task.OutputPath));
                 }
@@ -279,9 +285,15 @@ namespace YTDLPHost.Services
                     if (destMatch.Success)
                     {
                         task.OutputPath = destMatch.Groups[1].Value.Trim();
-                        string tempFileName = Path.GetFileName(task.OutputPath);
-                        if (!string.IsNullOrEmpty(tempFileName) && task.Title == "Unknown")
-                            task.Title = tempFileName;
+                        string cleanTitle = Path.GetFileNameWithoutExtension(task.OutputPath);
+                        
+                        cleanTitle = Regex.Replace(cleanTitle, @"\.(f\w+|en-orig|en|vtt|webp|jpg)$", "", RegexOptions.IgnoreCase);
+
+                        if (!string.IsNullOrEmpty(cleanTitle) && 
+                           (task.Title.Contains("Fetching Title") || task.Title.Contains("YouTube Video") || task.Title == "Unknown"))
+                        {
+                            task.Title = cleanTitle;
+                        }
                     }
                 }
             }
