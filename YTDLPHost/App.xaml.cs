@@ -64,9 +64,7 @@ namespace YTDLPHost
 
             _mainWindow = new MainWindow { DataContext = _mainViewModel };
             _mainWindow.Closing += OnMainWindowClosing;
-
-            // REMOVED: OnMainWindowStateChanged so the standard Windows Minimize button 
-            // minimizes to the Taskbar normally. 
+            _mainWindow.StateChanged += OnMainWindowStateChanged;
 
             _mainWindow.Show();
             _mainWindow.Activate();
@@ -99,9 +97,6 @@ namespace YTDLPHost
             _mainWindow.Activate();
             _mainWindow.Topmost = true;
             _mainWindow.Topmost = false;
-            
-            // Ensure ViewModel knows the window is visible
-            if (_mainViewModel != null) _mainViewModel.IsWindowVisible = true;
         }
 
         private void OnMainWindowClosing(object? sender, System.ComponentModel.CancelEventArgs e)
@@ -109,6 +104,15 @@ namespace YTDLPHost
             e.Cancel = true;
             _mainWindow?.Hide();
             _mainViewModel!.IsWindowVisible = false;
+        }
+
+        private void OnMainWindowStateChanged(object? sender, EventArgs e)
+        {
+            if (_mainWindow?.WindowState == WindowState.Minimized)
+            {
+                _mainWindow.Hide();
+                _mainViewModel!.IsWindowVisible = false;
+            }
         }
 
         protected override void OnExit(ExitEventArgs e)
