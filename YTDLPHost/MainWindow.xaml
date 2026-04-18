@@ -145,7 +145,7 @@
                                 <Path Data="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z" 
                                       Fill="{StaticResource ErrorBrush}" Width="16" Height="16" Stretch="Uniform"/>
                             </Button>
-                            
+                             
                             <Button Style="{StaticResource IconButtonStyle}"
                                     Command="{Binding DataContext.RemoveDownloadCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
                                     CommandParameter="{Binding}"
@@ -296,7 +296,7 @@
 
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                     <Button Style="{StaticResource IconButtonStyle}"
-                            Command="{Binding MinimizeToTrayCommand}"
+                            Click="OnMinimizeToTrayClick"
                             ToolTip="Minimize to Tray"
                             x:Name="MinimizeTrayButton">
                         <Path Data="M19,13H5V11H19V13Z" 
