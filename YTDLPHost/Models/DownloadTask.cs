@@ -48,6 +48,10 @@ namespace YTDLPHost.Models
         [ObservableProperty]
         private string _eta = "";
 
+        // REQUIRED FOR UI: Tracks the total file size
+        [ObservableProperty]
+        private string _fileSize = "";
+
         [ObservableProperty]
         private DownloadStatus _status = DownloadStatus.Queued;
 
@@ -78,16 +82,16 @@ namespace YTDLPHost.Models
         [ObservableProperty]
         private DateTime? _completedAt;
 
-        // MEMORY OPTIMIZATION: Separated the Full Disk Log from the UI Log
+        // REQUIRED FOR CLEANUP: Tracks every file yt-dlp touches
+        public HashSet<string> TrackedFiles { get; } = new();
+
         private readonly StringBuilder _fullLogBuilder = new();
         private readonly Queue<string> _uiLogQueue = new();
-        private const int MaxUiLogLines = 100; // Cap UI log at 100 lines to prevent WPF freezing
+        private const int MaxUiLogLines = 100; 
         private readonly object _logLock = new();
         
-        // This is saved to the disk
         public string FullLogText => _fullLogBuilder.ToString();
 
-        // This is bound to the WPF Textbox
         [ObservableProperty]
         private string _uiLogText = "";
 
@@ -99,10 +103,8 @@ namespace YTDLPHost.Models
             if (string.IsNullOrWhiteSpace(line)) return;
             lock (_logLock)
             {
-                // 1. Add to the full log for the disk file
                 _fullLogBuilder.AppendLine(line);
                 
-                // 2. Add to the rolling UI buffer (keeps memory usage tiny!)
                 _uiLogQueue.Enqueue(line);
                 if (_uiLogQueue.Count > MaxUiLogLines)
                 {
@@ -121,6 +123,7 @@ namespace YTDLPHost.Models
                 _uiLogQueue.Clear();
                 UiLogText = "";
                 LogFileSaved = false;
+                TrackedFiles.Clear();
             }
         }
     }
