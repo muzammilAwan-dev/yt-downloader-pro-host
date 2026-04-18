@@ -148,7 +148,7 @@ namespace YTDLPHost.Services
             bool needsUiUpdate = false;
             double oldProgress = task.Progress;
 
-            if (data.Contains("[download] Downloading item"))
+            if (data.Contains("[download] Downloading item", StringComparison.OrdinalIgnoreCase))
             {
                 var match = PlaylistRegex.Match(data);
                 if (match.Success)
@@ -166,63 +166,66 @@ namespace YTDLPHost.Services
                 return; 
             }
 
-            var fileTrackMatch = FileTrackerRegex.Match(data);
-            var alreadyDownloadedMatch = AlreadyDownloadedRegex.Match(data);
-
-            if ((fileTrackMatch.Success || alreadyDownloadedMatch.Success) && 
-                !data.Contains("[Merger]") && !data.Contains("[ExtractAudio]"))
+            // OPTIMIZATION: Fast-fail string checks prevent heavy Regex execution on 90% of console lines
+            if (data.Contains("Destination:", StringComparison.OrdinalIgnoreCase) || 
+                data.Contains("Writing video", StringComparison.OrdinalIgnoreCase) || 
+                data.Contains("has already been downloaded", StringComparison.OrdinalIgnoreCase))
             {
-                string path = fileTrackMatch.Success ? fileTrackMatch.Groups[1].Value.Trim() : alreadyDownloadedMatch.Groups[1].Value.Trim();
-                
-                if (!string.IsNullOrWhiteSpace(path))
+                var fileTrackMatch = FileTrackerRegex.Match(data);
+                var alreadyDownloadedMatch = AlreadyDownloadedRegex.Match(data);
+
+                if ((fileTrackMatch.Success || alreadyDownloadedMatch.Success) && 
+                    !data.Contains("[Merger]") && !data.Contains("[ExtractAudio]"))
                 {
-                    task.TrackedFiles.Add(path);
-                    task.OutputPath = path;
+                    string path = fileTrackMatch.Success ? fileTrackMatch.Groups[1].Value.Trim() : alreadyDownloadedMatch.Groups[1].Value.Trim();
                     
-                    string cleanTitle = Path.GetFileNameWithoutExtension(path);
-                    string ext = Path.GetExtension(path).ToLower();
-                    
-                    cleanTitle = Regex.Replace(cleanTitle, @"\.(f\w+|en-orig|en|vtt|webp|jpg)$", "", RegexOptions.IgnoreCase);
+                    if (!string.IsNullOrWhiteSpace(path))
+                    {
+                        task.TrackedFiles.Add(path);
+                        task.OutputPath = path;
+                        
+                        string cleanTitle = Path.GetFileNameWithoutExtension(path);
+                        string ext = Path.GetExtension(path).ToLower();
+                        
+                        cleanTitle = Regex.Replace(cleanTitle, @"\.(f\w+|en-orig|en|vtt|webp|jpg)$", "", RegexOptions.IgnoreCase);
 
-                    if (!string.IsNullOrEmpty(cleanTitle) && 
-                       (task.Title.Contains("Fetching Title") || task.Title.Contains("YouTube Video") || task.Title == "Unknown"))
-                    {
-                        task.Title = cleanTitle;
-                        OnInfoExtracted?.Invoke(this, new ExtractedInfoEventArgs(task.Id, task.Title, task.OutputPath));
-                    }
+                        if (!string.IsNullOrEmpty(cleanTitle) && 
+                           (task.Title.Contains("Fetching Title") || task.Title.Contains("YouTube Video") || task.Title == "Unknown"))
+                        {
+                            task.Title = cleanTitle;
+                            OnInfoExtracted?.Invoke(this, new ExtractedInfoEventArgs(task.Id, task.Title, task.OutputPath));
+                        }
 
-                    task.Progress = alreadyDownloadedMatch.Success ? 100.0 : 0.0;
-                    task.FileSize = "";
-                    oldProgress = task.Progress;
+                        task.Progress = alreadyDownloadedMatch.Success ? 100.0 : 0.0;
+                        task.FileSize = "";
+                        oldProgress = task.Progress;
 
-                    // THE BULLETPROOF STATE CLASSIFIER
-                    if (ext is ".vtt" or ".srt" or ".ass" or ".ttml" or ".lrc" or ".sbv" or ".ssa" or ".sub")
-                    {
-                        task.CurrentPhase = "Downloading Subtitles...";
-                    }
-                    else if (ext is ".webp" or ".jpg" or ".jpeg" or ".png" or ".gif" or ".bmp" or ".tiff")
-                    {
-                        task.CurrentPhase = "Downloading Thumbnail...";
-                    }
-                    else if (ext is ".m4a" or ".mp3" or ".ogg" or ".wav" or ".aac" or ".flac" or ".opus" or ".wma" || task.Resolution == "Audio")
-                    {
-                        // Safely catches ANY explicit audio extension OR if the user asked for audio mode
-                        task.CurrentPhase = "Downloading Audio...";
-                    }
-                    else
-                    {
-                        // For ambiguous media containers (.mp4, .webm, .mkv, .ts, etc.)
-                        if (task.CurrentPhase == "Downloading Video...") 
+                        if (ext is ".vtt" or ".srt" or ".ass" or ".ttml" or ".lrc" or ".sbv" or ".ssa" or ".sub")
+                        {
+                            task.CurrentPhase = "Downloading Subtitles...";
+                        }
+                        else if (ext is ".webp" or ".jpg" or ".jpeg" or ".png" or ".gif" or ".bmp" or ".tiff")
+                        {
+                            task.CurrentPhase = "Downloading Thumbnail...";
+                        }
+                        else if (ext is ".m4a" or ".mp3" or ".ogg" or ".wav" or ".aac" or ".flac" or ".opus" or ".wma" || task.Resolution == "Audio")
+                        {
                             task.CurrentPhase = "Downloading Audio...";
-                        else 
-                            task.CurrentPhase = "Downloading Video...";
+                        }
+                        else
+                        {
+                            if (task.CurrentPhase == "Downloading Video...") 
+                                task.CurrentPhase = "Downloading Audio...";
+                            else 
+                                task.CurrentPhase = "Downloading Video...";
+                        }
+                        
+                        needsUiUpdate = true;
                     }
-                    
-                    needsUiUpdate = true;
                 }
             }
 
-            if (!_extractionComplete && (data.Contains("[youtube]") || data.Contains("[info]")))
+            if (!_extractionComplete && (data.Contains("[youtube]", StringComparison.OrdinalIgnoreCase) || data.Contains("[info]", StringComparison.OrdinalIgnoreCase)))
             {
                 if (task.CurrentPhase == "Starting...")
                 {
@@ -254,7 +257,7 @@ namespace YTDLPHost.Services
                 task.IsIndeterminate = true;
                 needsUiUpdate = true;
             }
-            else if (data.Contains("[Merger]") || data.Contains("[MoveFiles]") || data.Contains("Fixing MPEG-TS"))
+            else if (data.Contains("[Merger]", StringComparison.OrdinalIgnoreCase) || data.Contains("[MoveFiles]", StringComparison.OrdinalIgnoreCase) || data.Contains("Fixing MPEG-TS", StringComparison.OrdinalIgnoreCase))
             {
                 task.CurrentPhase = "Merging & Finalizing...";
                 task.IsIndeterminate = true;
@@ -262,11 +265,14 @@ namespace YTDLPHost.Services
                 task.Eta = "";
                 needsUiUpdate = true;
 
-                var destMatch = FileTrackerRegex.Match(data);
-                if (destMatch.Success) task.OutputPath = destMatch.Groups[1].Value.Trim();
+                if (data.Contains("Destination:", StringComparison.OrdinalIgnoreCase))
+                {
+                    var destMatch = FileTrackerRegex.Match(data);
+                    if (destMatch.Success) task.OutputPath = destMatch.Groups[1].Value.Trim();
+                }
             }
 
-            if (data.Contains("[download]") && data.Contains("%"))
+            if (data.Contains("[download]", StringComparison.OrdinalIgnoreCase) && data.Contains("%"))
             {
                 task.IsIndeterminate = false; 
                 
