@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -59,7 +60,6 @@ namespace YTDLPHost.Models
         [ObservableProperty]
         private string _fileName = "";
 
-        // NEW: UI state trackers for audio/video/merge phases and playlists
         [ObservableProperty]
         private string _currentPhase = "Starting...";
 
@@ -78,11 +78,18 @@ namespace YTDLPHost.Models
         [ObservableProperty]
         private DateTime? _completedAt;
 
-        private readonly StringBuilder _logBuilder = new();
+        // MEMORY OPTIMIZATION: Separated the Full Disk Log from the UI Log
+        private readonly StringBuilder _fullLogBuilder = new();
+        private readonly Queue<string> _uiLogQueue = new();
+        private const int MaxUiLogLines = 100; // Cap UI log at 100 lines to prevent WPF freezing
         private readonly object _logLock = new();
         
+        // This is saved to the disk
+        public string FullLogText => _fullLogBuilder.ToString();
+
+        // This is bound to the WPF Textbox
         [ObservableProperty]
-        private string _fullLogText = "";
+        private string _uiLogText = "";
 
         [ObservableProperty]
         private bool _logFileSaved;
@@ -92,8 +99,17 @@ namespace YTDLPHost.Models
             if (string.IsNullOrWhiteSpace(line)) return;
             lock (_logLock)
             {
-                _logBuilder.AppendLine(line);
-                FullLogText = _logBuilder.ToString();
+                // 1. Add to the full log for the disk file
+                _fullLogBuilder.AppendLine(line);
+                
+                // 2. Add to the rolling UI buffer (keeps memory usage tiny!)
+                _uiLogQueue.Enqueue(line);
+                if (_uiLogQueue.Count > MaxUiLogLines)
+                {
+                    _uiLogQueue.Dequeue();
+                }
+
+                UiLogText = string.Join(Environment.NewLine, _uiLogQueue);
             }
         }
 
@@ -101,8 +117,9 @@ namespace YTDLPHost.Models
         {
             lock (_logLock)
             {
-                _logBuilder.Clear();
-                FullLogText = "";
+                _fullLogBuilder.Clear();
+                _uiLogQueue.Clear();
+                UiLogText = "";
                 LogFileSaved = false;
             }
         }
