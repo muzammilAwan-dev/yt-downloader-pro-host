@@ -19,13 +19,14 @@ namespace YTDLPHost.Services
                     {
                         Directory.CreateDirectory(LogDir);
                     }
+                    
                     string logEntry = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {message}\n";
                     File.AppendAllText(LogFile, logEntry);
                 }
             }
             catch 
             { 
-                // Fail silently so logging never crashes the app
+                // Fail silently. Logging should never be the reason the app crashes.
             }
         }
     }
