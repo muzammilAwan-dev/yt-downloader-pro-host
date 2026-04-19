@@ -18,38 +18,60 @@ namespace YTDLPHost
 
         protected override void OnStartup(StartupEventArgs e)
         {
-            // HARDWARE ACCELERATION FIX: Force CPU rendering to prevent GPU driver crashes under heavy UI load
+            // Initialize application logging.
+            AppLogger.Log("=====================================");
+            AppLogger.Log("=== YTDLP HOST APPLICATION START ===");
+            AppLogger.Log($"OS Version: {Environment.OSVersion}");
+
+            // Configure hardware acceleration: Force CPU rendering to prevent potential GPU driver instability.
             RenderOptions.ProcessRenderMode = RenderMode.SoftwareOnly;
 
-            // 1. BULLETPROOFING: Catch all UI Thread Exceptions
+            // Handle unhandled exceptions on the UI thread.
             this.DispatcherUnhandledException += (s, args) =>
             {
+                AppLogger.Log($"[CRITICAL UI CRASH] {args.Exception.Message}\n{args.Exception.StackTrace}");
                 System.Windows.MessageBox.Show($"UI Thread Crash Prevented:\n\n{args.Exception.Message}", "Fatal Error Caught", MessageBoxButton.OK, MessageBoxImage.Error);
                 args.Handled = true; 
             };
 
-            // 2. BULLETPROOFING: Catch all Background Thread Exceptions
+            // Handle unhandled exceptions on background threads.
             AppDomain.CurrentDomain.UnhandledException += (s, args) =>
             {
                 if (args.ExceptionObject is Exception ex)
                 {
+                    AppLogger.Log($"[CRITICAL BACKGROUND CRASH] {ex.Message}\n{ex.StackTrace}");
                     System.Windows.MessageBox.Show($"Background Thread Crash:\n\n{ex.Message}", "Fatal Error Caught", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             };
 
+            // Log launch arguments.
+            string? urlArg = e.Args.FirstOrDefault();
+            if (!string.IsNullOrEmpty(urlArg))
+            {
+                AppLogger.Log($"[BOOT] Launch Arguments Received: {urlArg}");
+            }
+            else
+            {
+                AppLogger.Log("[BOOT] Launched normally (no protocol arguments).");
+            }
+
             base.OnStartup(e);
 
             if (!ProtocolHandler.IsRegistered())
+            {
+                AppLogger.Log("[BOOT] Registering URL Protocol.");
                 ProtocolHandler.Register();
+            }
 
             _singleInstanceManager = new SingleInstanceManager();
             var isFirstInstance = _singleInstanceManager.Initialize();
 
             if (!isFirstInstance)
             {
-                var url = e.Args.FirstOrDefault() ?? "ytdlp://show";
+                AppLogger.Log("[BOOT] Secondary instance detected. Forwarding arguments and exiting.");
+                var url = urlArg ?? "ytdlp://show";
                 
-                // 3. DEADLOCK FIX: Never use .Wait() on the UI thread. Use background tasks.
+                // Execute instance forwarding on a background task to prevent UI thread deadlocks.
                 Task.Run(async () => 
                 {
                     await SingleInstanceManager.SendUrlToRunningInstanceAsync(url);
@@ -58,6 +80,7 @@ namespace YTDLPHost
                 return;
             }
 
+            AppLogger.Log("[BOOT] Primary instance established. Initializing UI components.");
             _singleInstanceManager.UrlReceived += OnUrlReceived;
             _mainViewModel = new MainViewModel();
             _mainViewModel.RequestShowWindow += OnRequestShowWindow;
@@ -65,20 +88,18 @@ namespace YTDLPHost
             _mainWindow = new MainWindow { DataContext = _mainViewModel };
             _mainWindow.Closing += OnMainWindowClosing;
             
-            // [FIX APPLIED] Removed the StateChanged event hook here so standard minimize goes to the Taskbar
-
             _mainWindow.Show();
             _mainWindow.Activate();
 
-            var startupUrl = e.Args.FirstOrDefault();
-            if (!string.IsNullOrEmpty(startupUrl) && startupUrl.StartsWith("ytdlp://"))
+            if (!string.IsNullOrEmpty(urlArg) && urlArg.StartsWith("ytdlp://"))
             {
-                _mainViewModel.ProcessUrl(startupUrl);
+                _mainViewModel.ProcessUrl(urlArg);
             }
         }
 
         private void OnUrlReceived(object? sender, string url)
         {
+            AppLogger.Log($"[NAMED PIPE] Received argument from secondary instance: {url}");
             if (_mainViewModel == null) return;
             Dispatcher.BeginInvoke(() =>
             {
@@ -107,10 +128,10 @@ namespace YTDLPHost
             _mainViewModel!.IsWindowVisible = false;
         }
 
-        // [FIX APPLIED] Removed the OnMainWindowStateChanged method completely
-
         protected override void OnExit(ExitEventArgs e)
         {
+            AppLogger.Log("=== APPLICATION EXITING ===");
+            AppLogger.Log("=====================================\n");
             _mainViewModel?.Dispose();
             _singleInstanceManager?.Dispose();
             base.OnExit(e);
