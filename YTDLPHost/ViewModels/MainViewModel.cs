@@ -2,13 +2,15 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
+using System.Net.Http;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
-using System.Windows.Threading; // ADDED: For DispatcherPriority optimization
+using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using YTDLPHost.Models;
@@ -18,7 +20,7 @@ namespace YTDLPHost.ViewModels
 {
     public partial class MainViewModel : ObservableObject, IDisposable
     {
-        // OPTIMIZATION 1: Compiled static Regexes save CPU cycles and garbage collection overhead
+        // Compiled regular expressions to minimize garbage collection and CPU overhead during high-frequency parsing.
         private static readonly Regex CommandPathRegex = new(@"-(?:o|P)\s+""([^""]+)""", RegexOptions.Compiled);
         private static readonly Regex OutputTemplateRegex = new(@"-o\s+""([^""]+)""", RegexOptions.Compiled);
         private static readonly Regex ResHeightRegex = new(@"height<=?(\d+)", RegexOptions.Compiled);
@@ -27,31 +29,20 @@ namespace YTDLPHost.ViewModels
         private readonly TrayIconService _trayService;
         private readonly ObservableCollection<DownloadItemViewModel> _downloads = new();
         private readonly Dictionary<Guid, YtDlpRunner> _activeRunners = new();
+        
+        // Defines the maximum number of concurrent download processes allowed.
         private const int MaxConcurrentDownloads = 3; 
 
         private bool _isProcessingQueue;
         private bool _disposed;
 
-        [ObservableProperty]
-        private bool _isWindowVisible = true;
-
-        [ObservableProperty]
-        private string _statusText = "Ready";
-
-        [ObservableProperty]
-        private int _activeDownloadCount = 0;
-
-        [ObservableProperty]
-        private bool _hasDownloads;
-
-        [ObservableProperty]
-        private bool _hasCompletedDownloads;
-
-        [ObservableProperty]
-        private string _emptyStateText = "No active downloads. Click Download in YouTube to add videos.";
-
-        [ObservableProperty]
-        private DownloadItemViewModel? _selectedItem;
+        [ObservableProperty] private bool _isWindowVisible = true;
+        [ObservableProperty] private string _statusText = "Ready";
+        [ObservableProperty] private int _activeDownloadCount = 0;
+        [ObservableProperty] private bool _hasDownloads;
+        [ObservableProperty] private bool _hasCompletedDownloads;
+        [ObservableProperty] private string _emptyStateText = "No active downloads. Click Download in YouTube to add videos.";
+        [ObservableProperty] private DownloadItemViewModel? _selectedItem;
 
         public ObservableCollection<DownloadItemViewModel> Downloads => _downloads;
 
@@ -72,6 +63,8 @@ namespace YTDLPHost.ViewModels
 
         public MainViewModel()
         {
+            AppLogger.Log("[VM] Initializing MainViewModel...");
+            
             _trayService = new TrayIconService();
             _trayService.ShowWindowRequested += (s, e) => RequestShowWindow?.Invoke(this, EventArgs.Empty);
             _trayService.ExitRequested += (s, e) => ExitCommand.Execute(null);
@@ -105,40 +98,118 @@ namespace YTDLPHost.ViewModels
                 UpdateActiveCount();
             };
 
-            CheckYtDlpExists();
+            // Execute dependency verification asynchronously to prevent UI thread blocking.
+            _ = CheckAndDownloadDependenciesAsync();
         }
 
-        private async void CheckYtDlpExists()
+        private async Task CheckAndDownloadDependenciesAsync()
+        {
+            try
+            {
+                string appDir = AppDomain.CurrentDomain.BaseDirectory;
+                string ytdlpPath = Path.Combine(appDir, "yt-dlp.exe");
+                string ffmpegPath = Path.Combine(appDir, "ffmpeg.exe");
+
+                if (File.Exists(ytdlpPath) && File.Exists(ffmpegPath))
+                {
+                    AppLogger.Log("[DEPENDENCIES] Core dependencies located. Initiating background auto-update process.");
+                    _ = Task.Run(() => UpdateYtDlp(ytdlpPath));
+                    return;
+                }
+
+                AppLogger.Log("[DEPENDENCIES] Dependencies missing. Commencing native download execution.");
+                System.Windows.Application.Current?.Dispatcher.BeginInvoke(() =>
+                {
+                    StatusText = "Downloading required engine updates... Please wait.";
+                });
+
+                using var client = new HttpClient();
+                
+                if (!File.Exists(ytdlpPath))
+                {
+                    AppLogger.Log("[DEPENDENCIES] Downloading yt-dlp binary.");
+                    var ytdlpBytes = await client.GetByteArrayAsync("https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe");
+                    await File.WriteAllBytesAsync(ytdlpPath, ytdlpBytes);
+                }
+
+                if (!File.Exists(ffmpegPath))
+                {
+                    AppLogger.Log("[DEPENDENCIES] Downloading FFmpeg build archive.");
+                    string zipPath = Path.Combine(Path.GetTempPath(), "ffmpeg.zip");
+                    string extractPath = Path.Combine(Path.GetTempPath(), "ffmpeg_ext");
+                    
+                    var ffmpegBytes = await client.GetByteArrayAsync("https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip");
+                    await File.WriteAllBytesAsync(zipPath, ffmpegBytes);
+                    
+                    AppLogger.Log("[DEPENDENCIES] Extracting FFmpeg archive contents.");
+                    if (Directory.Exists(extractPath)) Directory.Delete(extractPath, true);
+                    ZipFile.ExtractToDirectory(zipPath, extractPath);
+                    
+                    var extFiles = Directory.GetFiles(extractPath, "*.exe", SearchOption.AllDirectories);
+                    foreach (var file in extFiles)
+                    {
+                        string fileName = Path.GetFileName(file);
+                        if (fileName.Equals("ffmpeg.exe", StringComparison.OrdinalIgnoreCase) || 
+                            fileName.Equals("ffprobe.exe", StringComparison.OrdinalIgnoreCase))
+                        {
+                            File.Copy(file, Path.Combine(appDir, fileName), true);
+                        }
+                    }
+                    
+                    File.Delete(zipPath);
+                    Directory.Delete(extractPath, true);
+                }
+
+                AppLogger.Log("[DEPENDENCIES] Dependency installation complete.");
+                System.Windows.Application.Current?.Dispatcher.BeginInvoke(() => StatusText = "Ready");
+                
+                // Trigger background update verification to ensure parity with upstream repository.
+                _ = Task.Run(() => UpdateYtDlp(ytdlpPath));
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Log($"[DEPENDENCIES ERROR] Failed to provision dependencies: {ex.Message}\n{ex.StackTrace}");
+                System.Windows.Application.Current?.Dispatcher.BeginInvoke(() => StatusText = "Failed to download components. Check logs.");
+            }
+        }
+
+        private void UpdateYtDlp(string ytdlpPath)
         {
             try
             {
                 var psi = new System.Diagnostics.ProcessStartInfo
                 {
-                    FileName = "yt-dlp.exe",
-                    Arguments = "--version",
+                    FileName = ytdlpPath,
+                    Arguments = "-U",
                     CreateNoWindow = true,
                     UseShellExecute = false,
-                    RedirectStandardOutput = true
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
                 };
 
-                await Task.Run(() => 
+                using var proc = System.Diagnostics.Process.Start(psi);
+                if (proc != null)
                 {
-                    using var proc = System.Diagnostics.Process.Start(psi);
-                    proc?.WaitForExit(5000);
-                });
+                    string output = proc.StandardOutput.ReadToEnd();
+                    proc.WaitForExit(30000); // 30-second execution timeout.
+                    
+                    if (output.Contains("up to date", StringComparison.OrdinalIgnoreCase))
+                    {
+                        AppLogger.Log("[DEPENDENCIES] yt-dlp is synchronized with the latest release.");
+                    }
+                    else if (output.Contains("Updated yt-dlp", StringComparison.OrdinalIgnoreCase))
+                    {
+                        AppLogger.Log("[DEPENDENCIES] yt-dlp successfully patched to the latest version.");
+                    }
+                    else
+                    {
+                        AppLogger.Log($"[DEPENDENCIES] Update routine concluded with standard output: {output.Trim()}");
+                    }
+                }
             }
-            catch
+            catch (Exception ex)
             {
-                System.Windows.Application.Current?.Dispatcher.BeginInvoke(() =>
-                {
-                    StatusText = "yt-dlp not found. Please run setup.bat first.";
-                    System.Windows.MessageBox.Show(
-                        "yt-dlp.exe was not found in your PATH.\n\n" +
-                        "Please run setup.bat first to install yt-dlp, ffmpeg, and configure the protocol handler.",
-                        "YT Downloader Pro - Component Missing",
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Error);
-                });
+                AppLogger.Log($"[DEPENDENCIES ERROR] Execution of the update sub-process failed: {ex.Message}");
             }
         }
 
@@ -149,7 +220,7 @@ namespace YTDLPHost.ViewModels
             {
                 if (command.Contains(flag, StringComparison.OrdinalIgnoreCase))
                 {
-                    System.Diagnostics.Debug.WriteLine($"SECURITY ALERT: Blocked command injection flag: {flag}");
+                    AppLogger.Log($"[SECURITY ALERT] Blocked injection vector detected: {flag}");
                     return false;
                 }
             }
@@ -162,7 +233,7 @@ namespace YTDLPHost.ViewModels
                     path.StartsWith(@"C:\Windows", StringComparison.OrdinalIgnoreCase) ||
                     path.Contains(@"\Start Menu\Programs\Startup", StringComparison.OrdinalIgnoreCase))
                 {
-                    System.Diagnostics.Debug.WriteLine($"SECURITY ALERT: Blocked malicious path traversal: {path}");
+                    AppLogger.Log($"[SECURITY ALERT] Blocked malicious path traversal sequence: {path}");
                     return false;
                 }
             }
@@ -172,6 +243,7 @@ namespace YTDLPHost.ViewModels
 
         public void ProcessUrl(string? url)
         {
+            AppLogger.Log($"https://www.bestbuy.com/site/computer-cards-components/computer-pc-processors/abcat0507010.c?id=abcat0507010 Validating incoming URL payload. Length: {url?.Length ?? 0}");
             if (string.IsNullOrWhiteSpace(url)) return;
 
             try
@@ -180,6 +252,7 @@ namespace YTDLPHost.ViewModels
 
                 if (!url.StartsWith("ytdlp://", StringComparison.OrdinalIgnoreCase))
                 {
+                    AppLogger.Log("https://www.bestbuy.com/site/computer-cards-components/computer-pc-processors/abcat0507010.c?id=abcat0507010 Payload rejected due to invalid protocol prefix.");
                     StatusText = "Invalid protocol URL received.";
                     return;
                 }
@@ -190,6 +263,8 @@ namespace YTDLPHost.ViewModels
                 if (parts.Length == 0 || string.IsNullOrWhiteSpace(parts[0])) return;
 
                 var command = DecodeBase64(parts[0]);
+                AppLogger.Log($"https://www.bestbuy.com/site/computer-cards-components/computer-pc-processors/abcat0507010.c?id=abcat0507010 Command decoded successfully. Length: {command.Length}");
+                
                 if (string.IsNullOrWhiteSpace(command)) return;
 
                 if (!IsCommandSafe(command))
@@ -212,9 +287,13 @@ namespace YTDLPHost.ViewModels
                             var cookieFile = Path.Combine(Path.GetTempPath(), $"ytdlp_cookies_{Guid.NewGuid()}.txt");
                             File.WriteAllText(cookieFile, cookieContent, Encoding.UTF8);
                             cookieFilePath = cookieFile;
+                            AppLogger.Log("https://www.bestbuy.com/site/computer-cards-components/computer-pc-processors/abcat0507010.c?id=abcat0507010 Session cookies provisioned to local temporary storage.");
                         }
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        AppLogger.Log($"https://www.ibm.com/support/pages/troubleshooting-processor-issues Cookie deserialization failure: {ex.Message}");
+                    }
                 }
 
                 var task = new DownloadTask
@@ -234,9 +313,14 @@ namespace YTDLPHost.ViewModels
 
                 StatusText = $"Added: {vm.DisplayTitle}";
                 UpdateActiveCount();
+                AppLogger.Log($"[QUEUE] Download task assigned to queue ID: {vm.Id}");
+                
                 _ = ProcessQueueAsync();
             }
-            catch { }
+            catch (Exception ex)
+            {
+                AppLogger.Log($"https://learn.microsoft.com/en-us/answers/questions/3302330/windows-critical-process-died-error-please-help Payload execution fault: {ex.Message}\n{ex.StackTrace}");
+            }
         }
 
         private async Task ProcessQueueAsync()
@@ -261,8 +345,10 @@ namespace YTDLPHost.ViewModels
                     StatusText = $"Downloading: {next.DisplayTitle}";
                     UpdateActiveCount();
 
+                    AppLogger.Log($"[QUEUE] Spawning execution runner for task ID: {next.Id}");
                     _ = StartDownloadTaskAsync(next);
 
+                    // Imposes a localized delay to prevent rapid process instantiation saturation.
                     await Task.Delay(1500); 
                 }
 
@@ -296,7 +382,7 @@ namespace YTDLPHost.ViewModels
             _ = ProcessQueueAsync();
         }
 
-        // OPTIMIZATION 2: Using DispatcherPriority.Background keeps the UI fully responsive during fast updates
+        // Implementation of DispatcherPriority.Background ensures rendering threads remain unobstructed.
         private void OnRunnerProgress(object? sender, ProgressEventArgs e)
         {
             var vm = _downloads.FirstOrDefault(d => d.Id == e.TaskId);
@@ -335,7 +421,8 @@ namespace YTDLPHost.ViewModels
         private void PauseDownload(DownloadItemViewModel? vm)
         {
             if (vm == null) return;
-
+            AppLogger.Log($"[QUEUE] Process suspended for task ID: {vm.Id}");
+            
             if (_activeRunners.TryGetValue(vm.Id, out var runner))
                 runner.Cancel();
 
@@ -347,7 +434,8 @@ namespace YTDLPHost.ViewModels
         private void CancelDownload(DownloadItemViewModel? vm)
         {
             if (vm == null) return;
-
+            AppLogger.Log($"[QUEUE] Process termination requested for task ID: {vm.Id}");
+            
             if (_activeRunners.TryGetValue(vm.Id, out var runner))
                 runner.Cancel();
 
@@ -400,17 +488,20 @@ namespace YTDLPHost.ViewModels
         private void ResumeDownload(DownloadItemViewModel? vm)
         {
             if (vm == null) return;
+            AppLogger.Log($"[QUEUE] Process resumption initiated for task ID: {vm.Id}");
 
             vm.Task.Status = DownloadStatus.Queued;
             vm.Task.ErrorMessage = "";
             vm.Refresh();
             UpdateActiveCount();
+            
             _ = ProcessQueueAsync();
         }
 
         private void RemoveDownload(DownloadItemViewModel? vm)
         {
             if (vm == null) return;
+            AppLogger.Log($"[QUEUE] Task purged from registry. ID: {vm.Id}");
 
             if (_activeRunners.TryGetValue(vm.Id, out var runner))
                 runner.Cancel();
@@ -489,6 +580,7 @@ namespace YTDLPHost.ViewModels
             }
             HasCompletedDownloads = _downloads.Any(d => d.Task.Status == DownloadStatus.Completed);
             UpdateActiveCount();
+            AppLogger.Log("[QUEUE] Completed tasks successfully purged from collection.");
         }
 
         private static void CleanupCookieFile(DownloadTask task)
@@ -555,6 +647,7 @@ namespace YTDLPHost.ViewModels
 
         private void ExitApplication()
         {
+            AppLogger.Log("[SYSTEM] Application termination sequence invoked.");
             foreach (var vm in _downloads) CleanupCookieFile(vm.Task);
             foreach (var runner in _activeRunners.Values) runner.Cancel();
             System.Windows.Application.Current?.Shutdown();
