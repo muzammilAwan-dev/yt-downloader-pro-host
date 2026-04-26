@@ -33,9 +33,8 @@ namespace YTDLPHost.ViewModels
 
         private bool _isProcessingQueue;
         private bool _disposed;
-        
-        // BUG FIX: Prevents queue from processing before dependencies are fully downloaded
         private bool _isDependenciesReady;
+        private bool _hasDependencyError;
 
         [ObservableProperty] private bool _isWindowVisible = true;
         [ObservableProperty] private string _statusText = "Ready";
@@ -104,6 +103,8 @@ namespace YTDLPHost.ViewModels
 
         private async Task CheckAndDownloadDependenciesAsync()
         {
+            DownloadItemViewModel? setupVm = null;
+            
             try
             {
                 string appDir = AppDomain.CurrentDomain.BaseDirectory;
@@ -115,13 +116,12 @@ namespace YTDLPHost.ViewModels
                     AppLogger.Log("[DEPENDENCIES] Core dependencies located.");
                     _isDependenciesReady = true;
                     _ = Task.Run(() => UpdateYtDlp(ytdlpPath));
-                    _ = ProcessQueueAsync(); // Process any URLs that arrived instantly
+                    _ = ProcessQueueAsync(); 
                     return;
                 }
 
                 AppLogger.Log("[DEPENDENCIES] Dependencies missing. Creating UX Setup Card.");
                 
-                // UX FIX: Create a highly visible "Setup" card in the queue so the user doesn't panic
                 var setupTask = new DownloadTask
                 {
                     Id = Guid.NewGuid(),
@@ -130,7 +130,7 @@ namespace YTDLPHost.ViewModels
                     CurrentPhase = "Initializing download...",
                     IsIndeterminate = true
                 };
-                var setupVm = new DownloadItemViewModel(setupTask);
+                setupVm = new DownloadItemViewModel(setupTask);
 
                 System.Windows.Application.Current?.Dispatcher.Invoke(() =>
                 {
@@ -139,7 +139,8 @@ namespace YTDLPHost.ViewModels
                 });
 
                 using var client = new HttpClient();
-                client.Timeout = TimeSpan.FromMinutes(30);    
+                client.Timeout = TimeSpan.FromMinutes(30); 
+                
                 if (!File.Exists(ytdlpPath))
                 {
                     AppLogger.Log("[DEPENDENCIES] Downloading yt-dlp binary.");
@@ -205,14 +206,12 @@ namespace YTDLPHost.ViewModels
                     StatusText = "Ready";
                 });
 
-                // Hold the success card for 2 seconds so the user can see it finished, then remove it
                 await Task.Delay(2000);
                 System.Windows.Application.Current?.Dispatcher.Invoke(() =>
                 {
                     _downloads.Remove(setupVm);
                 });
 
-                // Unlock the queue and start downloading the user's YouTube videos
                 _isDependenciesReady = true;
                 _ = Task.Run(() => UpdateYtDlp(ytdlpPath));
                 _ = ProcessQueueAsync();
@@ -220,9 +219,21 @@ namespace YTDLPHost.ViewModels
             catch (Exception ex)
             {
                 AppLogger.Log($"[DEPENDENCIES ERROR] Failed to provision dependencies: {ex.Message}\n{ex.StackTrace}");
-                System.Windows.Application.Current?.Dispatcher.BeginInvoke(() => 
+                _hasDependencyError = true;
+                
+                System.Windows.Application.Current?.Dispatcher.Invoke(() => 
                 {
-                    StatusText = "Failed to download components. Check logs.";
+                    StatusText = "Network Error. Please check your internet connection.";
+                    
+                    // UX FIX: Reflect the failure visually on the dummy card instead of leaving it spinning
+                    if (setupVm != null)
+                    {
+                        setupVm.Task.Status = DownloadStatus.Error;
+                        setupVm.Task.CurrentPhase = "Setup Failed! Please restart the app.";
+                        setupVm.Task.IsIndeterminate = false;
+                        setupVm.Task.ErrorMessage = "Check your internet connection and try again.";
+                        setupVm.Refresh();
+                    }
                 });
             }
         }
@@ -296,6 +307,13 @@ namespace YTDLPHost.ViewModels
             AppLogger.Log($"https://www.amazon.com/CPU-Processors-Memory-Computer-Add-Ons/b?ie=UTF8&node=229189 Validating incoming URL payload. Length: {url?.Length ?? 0}");
             if (string.IsNullOrWhiteSpace(url)) return;
 
+            // UX FIX: Do not accept new links if the app fundamentally failed to install engines.
+            if (_hasDependencyError)
+            {
+                System.Windows.MessageBox.Show("YT Downloader Pro cannot process links because the initial core setup failed.\n\nPlease ensure you have an active internet connection and restart the application.", "Setup Required", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
             try
             {
                 url = Uri.UnescapeDataString(url);
@@ -358,10 +376,15 @@ namespace YTDLPHost.ViewModels
                 };
 
                 var vm = new DownloadItemViewModel(task);
-                _downloads.Add(vm);
-                HasDownloads = true;
-
-                StatusText = $"Added: {vm.DisplayTitle}";
+                
+                // THREAD SAFETY FIX: Ensure UI collection is modified strictly on the UI thread
+                System.Windows.Application.Current?.Dispatcher.Invoke(() =>
+                {
+                    _downloads.Add(vm);
+                    HasDownloads = true;
+                    StatusText = $"Added: {vm.DisplayTitle}";
+                });
+                
                 UpdateActiveCount();
                 AppLogger.Log($"[QUEUE] Download task assigned to queue ID: {vm.Id}");
                 
@@ -377,7 +400,6 @@ namespace YTDLPHost.ViewModels
         {
             if (_isProcessingQueue) return;
             
-            // UX/RACE CONDITION FIX: Wait here until yt-dlp and ffmpeg are fully downloaded!
             if (!_isDependenciesReady) 
             {
                 AppLogger.Log("[QUEUE] Queue processing deferred. Waiting for dependencies to finish downloading.");
@@ -392,15 +414,26 @@ namespace YTDLPHost.ViewModels
                 {
                     if (_activeRunners.Count >= MaxConcurrentDownloads) break;
 
-                    var next = _downloads.FirstOrDefault(d => d.Task.Status == DownloadStatus.Queued);
+                    DownloadItemViewModel? next = null;
+                    
+                    // THREAD SAFETY FIX: Ensure LINQ reads the observable collection on the UI Thread
+                    System.Windows.Application.Current?.Dispatcher.Invoke(() =>
+                    {
+                        next = _downloads.FirstOrDefault(d => d.Task.Status == DownloadStatus.Queued);
+                    });
+
                     if (next == null) break;
 
                     next.Task.Status = DownloadStatus.Downloading;
-                    next.Refresh();
-                    SelectedItem = next;
+                    
+                    System.Windows.Application.Current?.Dispatcher.Invoke(() =>
+                    {
+                        next.Refresh();
+                        SelectedItem = next;
+                        StatusText = $"Downloading: {next.DisplayTitle}";
+                    });
+                    
                     RequestScrollToItem?.Invoke(this, next);
-
-                    StatusText = $"Downloading: {next.DisplayTitle}";
                     UpdateActiveCount();
 
                     AppLogger.Log($"[QUEUE] Spawning execution runner for task ID: {next.Id}");
@@ -409,10 +442,13 @@ namespace YTDLPHost.ViewModels
                     await Task.Delay(1500); 
                 }
 
-                if (_activeRunners.Count == 0 && _downloads.Count(d => d.Task.Status == DownloadStatus.Queued) == 0)
+                System.Windows.Application.Current?.Dispatcher.Invoke(() =>
                 {
-                    StatusText = "All downloads complete";
-                }
+                    if (_activeRunners.Count == 0 && _downloads.Count(d => d.Task.Status == DownloadStatus.Queued) == 0)
+                    {
+                        StatusText = "All downloads complete";
+                    }
+                });
             }
             finally
             {
@@ -476,12 +512,10 @@ namespace YTDLPHost.ViewModels
 
         private void PauseDownload(DownloadItemViewModel? vm)
         {
-            if (vm == null) return;
-            AppLogger.Log($"[QUEUE] Process suspended for task ID: {vm.Id}");
+            if (vm == null || vm.Task.Title == "Initial System Setup") return;
             
-            if (_activeRunners.TryGetValue(vm.Id, out var runner))
-                runner.Cancel();
-
+            AppLogger.Log($"[QUEUE] Process suspended for task ID: {vm.Id}");
+            if (_activeRunners.TryGetValue(vm.Id, out var runner)) runner.Cancel();
             vm.Task.Status = DownloadStatus.Paused;
             vm.Refresh();
             UpdateActiveCount();
@@ -489,16 +523,13 @@ namespace YTDLPHost.ViewModels
 
         private void CancelDownload(DownloadItemViewModel? vm)
         {
-            if (vm == null) return;
-            AppLogger.Log($"[QUEUE] Process termination requested for task ID: {vm.Id}");
+            if (vm == null || vm.Task.Title == "Initial System Setup") return;
             
-            if (_activeRunners.TryGetValue(vm.Id, out var runner))
-                runner.Cancel();
-
+            AppLogger.Log($"[QUEUE] Process termination requested for task ID: {vm.Id}");
+            if (_activeRunners.TryGetValue(vm.Id, out var runner)) runner.Cancel();
             vm.Task.Status = DownloadStatus.Cancelled;
             vm.Refresh();
             UpdateActiveCount();
-
             Task.Run(() => CleanupPartialFiles(vm.Task, forceDeleteAll: true));
             CleanupCookieFile(vm.Task);
         }
@@ -507,15 +538,8 @@ namespace YTDLPHost.ViewModels
         {
             foreach (var filePath in task.TrackedFiles.Distinct().ToList())
             {
-                if (!forceDeleteAll && filePath.Equals(task.OutputPath, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                if (File.Exists(filePath))
-                {
-                    try { File.Delete(filePath); } catch { }
-                }
+                if (!forceDeleteAll && filePath.Equals(task.OutputPath, StringComparison.OrdinalIgnoreCase)) continue;
+                if (File.Exists(filePath)) try { File.Delete(filePath); } catch { }
             }
 
             if (forceDeleteAll && !string.IsNullOrEmpty(task.OutputPath))
@@ -530,10 +554,7 @@ namespace YTDLPHost.ViewModels
                         var files = Directory.GetFiles(dir, $"{title}*");
                         foreach (var file in files)
                         {
-                            if (file.EndsWith(".part") || file.EndsWith(".ytdl") || file.EndsWith(".frag"))
-                            {
-                                File.Delete(file);
-                            }
+                            if (file.EndsWith(".part") || file.EndsWith(".ytdl") || file.EndsWith(".frag")) File.Delete(file);
                         }
                     }
                 }
@@ -543,25 +564,22 @@ namespace YTDLPHost.ViewModels
 
         private void ResumeDownload(DownloadItemViewModel? vm)
         {
-            if (vm == null) return;
+            if (vm == null || vm.Task.Title == "Initial System Setup") return;
+            
             AppLogger.Log($"[QUEUE] Process resumption initiated for task ID: {vm.Id}");
-
             vm.Task.Status = DownloadStatus.Queued;
             vm.Task.ErrorMessage = "";
             vm.Refresh();
             UpdateActiveCount();
-            
             _ = ProcessQueueAsync();
         }
 
         private void RemoveDownload(DownloadItemViewModel? vm)
         {
-            if (vm == null) return;
+            if (vm == null || vm.Task.Title == "Initial System Setup") return;
+            
             AppLogger.Log($"[QUEUE] Task purged from registry. ID: {vm.Id}");
-
-            if (_activeRunners.TryGetValue(vm.Id, out var runner))
-                runner.Cancel();
-
+            if (_activeRunners.TryGetValue(vm.Id, out var runner)) runner.Cancel();
             CleanupCookieFile(vm.Task);
             _downloads.Remove(vm);
             UpdateActiveCount();
@@ -569,17 +587,12 @@ namespace YTDLPHost.ViewModels
 
         private static void OpenFolder(DownloadItemViewModel? vm)
         {
-            if (vm?.Task == null) return;
+            if (vm?.Task == null || vm.Task.Title == "Initial System Setup") return;
+            
             var path = vm.Task.OutputPath;
-
             if (!string.IsNullOrEmpty(path) && File.Exists(path))
             {
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = "explorer.exe",
-                    Arguments = $"/select,\"{path}\"",
-                    UseShellExecute = true
-                });
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = "explorer.exe", Arguments = $"/select,\"{path}\"", UseShellExecute = true });
                 return;
             }
 
@@ -588,11 +601,7 @@ namespace YTDLPHost.ViewModels
                 var dir = Path.GetDirectoryName(path);
                 if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
                 {
-                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                    {
-                        FileName = dir,
-                        UseShellExecute = true
-                    });
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = dir, UseShellExecute = true });
                     return;
                 }
             }
@@ -600,29 +609,20 @@ namespace YTDLPHost.ViewModels
             var saveDir = ExtractSaveDirectory(vm.Task.Command);
             if (Directory.Exists(saveDir))
             {
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = saveDir,
-                    UseShellExecute = true
-                });
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = saveDir, UseShellExecute = true });
             }
         }
 
         private static void PlayFile(DownloadItemViewModel? vm)
         {
-            if (vm?.Task == null) return;
-            var path = vm.Task.OutputPath;
+            if (vm?.Task == null || vm.Task.Title == "Initial System Setup") return;
             
+            var path = vm.Task.OutputPath;
             if (!string.IsNullOrEmpty(path) && File.Exists(path))
             {
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = path,
-                    UseShellExecute = true
-                });
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = path, UseShellExecute = true });
                 return;
             }
-
             OpenFolder(vm);
         }
 
@@ -647,8 +647,11 @@ namespace YTDLPHost.ViewModels
 
         private void UpdateActiveCount()
         {
-            ActiveDownloadCount = _downloads.Count(d => d.Task.Status == DownloadStatus.Queued || d.Task.Status == DownloadStatus.Downloading);
-            _trayService.UpdateTooltip(ActiveDownloadCount == 0 ? "YT Downloader Pro - Idle" : $"YT Downloader Pro - {ActiveDownloadCount} active");
+            System.Windows.Application.Current?.Dispatcher.BeginInvoke(() =>
+            {
+                ActiveDownloadCount = _downloads.Count(d => d.Task.Status == DownloadStatus.Queued || d.Task.Status == DownloadStatus.Downloading);
+                _trayService.UpdateTooltip(ActiveDownloadCount == 0 ? "YT Downloader Pro - Idle" : $"YT Downloader Pro - {ActiveDownloadCount} active");
+            });
         }
 
         private static string DecodeBase64(string input)
@@ -661,13 +664,10 @@ namespace YTDLPHost.ViewModels
         private static string ExtractResolution(string command)
         {
             if (command.Contains("ba") && (command.Contains("extract-audio") || command.Contains("audio"))) return "Audio";
-            
             var match = ResHeightRegex.Match(command);
             if (match.Success) return match.Groups[1].Value + "p";
-            
             match = ResRegex.Match(command);
             if (match.Success) return match.Groups[1].Value + "p";
-            
             return "";
         }
 
@@ -689,41 +689,21 @@ namespace YTDLPHost.ViewModels
             {
                 var template = match.Groups[1].Value;
                 var dir = Path.GetDirectoryName(template);
-                
                 if (!string.IsNullOrEmpty(dir))
                 {
-                    // 1. Normalize web slashes to Windows slashes
                     dir = dir.Replace("/", "\\");
                     dir = Environment.ExpandEnvironmentVariables(dir);
-                    
-                    // 2. Safely resolve the "~" home directory symbol
                     if (dir.StartsWith("~\\") || dir.StartsWith("~"))
                     {
                         dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), dir.Substring(1).TrimStart('\\'));
                     }
-                    
-                    // 3. UX FIX: If the folder doesn't exist yet, create it!
                     if (!Directory.Exists(dir))
                     {
-                        try 
-                        { 
-                            Directory.CreateDirectory(dir); 
-                        } 
-                        catch 
-                        { 
-                            // If creation fails (e.g., permissions), let it fall through to the fallback
-                        }
+                        try { Directory.CreateDirectory(dir); } catch { }
                     }
-
-                    // 4. Return the exact folder
-                    if (Directory.Exists(dir))
-                    {
-                        return dir;
-                    }
+                    if (Directory.Exists(dir)) return dir;
                 }
             }
-            
-            // Ultimate fallback if everything else fails
             return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         }
 
