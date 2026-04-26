@@ -107,13 +107,27 @@ namespace YTDLPHost.ViewModels
             
             try
             {
-                string appDir = AppDomain.CurrentDomain.BaseDirectory;
-                string ytdlpPath = Path.Combine(appDir, "yt-dlp.exe");
-                string ffmpegPath = Path.Combine(appDir, "ffmpeg.exe");
+                // Core fix: Store engines in LocalAppData to bypass UAC locks
+                string engineDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YT Downloader Pro", "Engine");
+                
+                if (!Directory.Exists(engineDir)) 
+                {
+                    Directory.CreateDirectory(engineDir);
+                }
+
+                // Temporary PATH injection so yt-dlp can find ffmpeg natively
+                string currentPath = Environment.GetEnvironmentVariable("PATH") ?? "";
+                if (!currentPath.Contains(engineDir, StringComparison.OrdinalIgnoreCase))
+                {
+                    Environment.SetEnvironmentVariable("PATH", engineDir + ";" + currentPath);
+                }
+
+                string ytdlpPath = Path.Combine(engineDir, "yt-dlp.exe");
+                string ffmpegPath = Path.Combine(engineDir, "ffmpeg.exe");
 
                 if (File.Exists(ytdlpPath) && File.Exists(ffmpegPath))
                 {
-                    AppLogger.Log("[DEPENDENCIES] Core dependencies located.");
+                    AppLogger.Log("[DEPENDENCIES] Core dependencies located in LocalAppData.");
                     _isDependenciesReady = true;
                     _ = Task.Run(() => UpdateYtDlp(ytdlpPath));
                     _ = ProcessQueueAsync(); 
@@ -139,7 +153,7 @@ namespace YTDLPHost.ViewModels
                 });
 
                 using var client = new HttpClient();
-                client.Timeout = TimeSpan.FromMinutes(30); 
+                client.Timeout = TimeSpan.FromMinutes(20); 
                 client.DefaultRequestHeaders.Add("User-Agent", "YTDownloaderPro/6.0 (Windows NT 10.0; Win64; x64)");
                 
                 if (!File.Exists(ytdlpPath))
@@ -187,7 +201,7 @@ namespace YTDLPHost.ViewModels
                         if (fileName.Equals("ffmpeg.exe", StringComparison.OrdinalIgnoreCase) || 
                             fileName.Equals("ffprobe.exe", StringComparison.OrdinalIgnoreCase))
                         {
-                            File.Copy(file, Path.Combine(appDir, fileName), true);
+                            File.Copy(file, Path.Combine(engineDir, fileName), true);
                         }
                     }
                     
@@ -226,7 +240,6 @@ namespace YTDLPHost.ViewModels
                 {
                     StatusText = "Network Error. Please check your internet connection.";
                     
-                    // UX FIX: Reflect the failure visually on the dummy card instead of leaving it spinning
                     if (setupVm != null)
                     {
                         setupVm.Task.Status = DownloadStatus.Error;
@@ -308,7 +321,6 @@ namespace YTDLPHost.ViewModels
             AppLogger.Log($"https://www.amazon.com/CPU-Processors-Memory-Computer-Add-Ons/b?ie=UTF8&node=229189 Validating incoming URL payload. Length: {url?.Length ?? 0}");
             if (string.IsNullOrWhiteSpace(url)) return;
 
-            // UX FIX: Do not accept new links if the app fundamentally failed to install engines.
             if (_hasDependencyError)
             {
                 System.Windows.MessageBox.Show("YT Downloader Pro cannot process links because the initial core setup failed.\n\nPlease ensure you have an active internet connection and restart the application.", "Setup Required", MessageBoxButton.OK, MessageBoxImage.Error);
@@ -378,7 +390,6 @@ namespace YTDLPHost.ViewModels
 
                 var vm = new DownloadItemViewModel(task);
                 
-                // THREAD SAFETY FIX: Ensure UI collection is modified strictly on the UI thread
                 System.Windows.Application.Current?.Dispatcher.Invoke(() =>
                 {
                     _downloads.Add(vm);
@@ -417,7 +428,6 @@ namespace YTDLPHost.ViewModels
 
                     DownloadItemViewModel? next = null;
                     
-                    // THREAD SAFETY FIX: Ensure LINQ reads the observable collection on the UI Thread
                     System.Windows.Application.Current?.Dispatcher.Invoke(() =>
                     {
                         next = _downloads.FirstOrDefault(d => d.Task.Status == DownloadStatus.Queued);
