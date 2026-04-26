@@ -689,15 +689,41 @@ namespace YTDLPHost.ViewModels
             {
                 var template = match.Groups[1].Value;
                 var dir = Path.GetDirectoryName(template);
+                
                 if (!string.IsNullOrEmpty(dir))
                 {
+                    // 1. Normalize web slashes to Windows slashes
+                    dir = dir.Replace("/", "\\");
                     dir = Environment.ExpandEnvironmentVariables(dir);
-                    if (dir.StartsWith("~"))
-                        dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), dir.Substring(1).TrimStart('/', '\\'));
+                    
+                    // 2. Safely resolve the "~" home directory symbol
+                    if (dir.StartsWith("~\\") || dir.StartsWith("~"))
+                    {
+                        dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), dir.Substring(1).TrimStart('\\'));
+                    }
+                    
+                    // 3. UX FIX: If the folder doesn't exist yet, create it!
+                    if (!Directory.Exists(dir))
+                    {
+                        try 
+                        { 
+                            Directory.CreateDirectory(dir); 
+                        } 
+                        catch 
+                        { 
+                            // If creation fails (e.g., permissions), let it fall through to the fallback
+                        }
+                    }
+
+                    // 4. Return the exact folder
                     if (Directory.Exists(dir))
+                    {
                         return dir;
+                    }
                 }
             }
+            
+            // Ultimate fallback if everything else fails
             return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         }
 
