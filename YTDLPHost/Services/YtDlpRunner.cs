@@ -58,15 +58,9 @@ namespace YTDLPHost.Services
             {
                 var saveDirectory = ExtractSaveDirectory(command);
 
-                // THE FIX: Define the absolute paths to the LocalAppData Engine
-                string engineDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YT Downloader Pro", "Engine");
-                string ytdlpPath = Path.Combine(engineDir, "yt-dlp.exe");
-
-                // THE FIX: Inject the FFmpeg location so the background runner never loses the codecs
-                if (!command.Contains("--ffmpeg-location"))
-                {
-                    command += $" --ffmpeg-location \"{engineDir}\"";
-                }
+                // ROLLBACK FIX: Point back to the main app directory
+                string appDir = AppDomain.CurrentDomain.BaseDirectory;
+                string ytdlpPath = Path.Combine(appDir, "yt-dlp.exe");
 
                 if (!string.IsNullOrEmpty(task.CookieFilePath) && File.Exists(task.CookieFilePath))
                 {
@@ -79,10 +73,10 @@ namespace YTDLPHost.Services
 
                 var psi = new ProcessStartInfo
                 {
-                    FileName = ytdlpPath, // THE FIX: Use absolute path to bypass Windows Shell aliases
+                    FileName = ytdlpPath, // Absolute path to bypass Windows Shell aliases
                     Arguments = command,
                     CreateNoWindow = true,
-                    WindowStyle = ProcessWindowStyle.Hidden, // THE FIX: Bulletproof hidden window
+                    WindowStyle = ProcessWindowStyle.Hidden, // Keeps the terminal window completely invisible
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
