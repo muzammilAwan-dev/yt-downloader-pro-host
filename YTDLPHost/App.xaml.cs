@@ -18,15 +18,13 @@ namespace YTDLPHost
 
         protected override void OnStartup(StartupEventArgs e)
         {
-            // Initialize application logging.
             AppLogger.Log("=====================================");
             AppLogger.Log("=== YTDLP HOST APPLICATION START ===");
             AppLogger.Log($"OS Version: {Environment.OSVersion}");
 
-            // Configure hardware acceleration: Force CPU rendering to prevent potential GPU driver instability.
+            // HARDWARE ACCELERATION FIX: Force CPU rendering to prevent GPU driver crashes
             RenderOptions.ProcessRenderMode = RenderMode.SoftwareOnly;
 
-            // Handle unhandled exceptions on the UI thread.
             this.DispatcherUnhandledException += (s, args) =>
             {
                 AppLogger.Log($"[CRITICAL UI CRASH] {args.Exception.Message}\n{args.Exception.StackTrace}");
@@ -34,7 +32,6 @@ namespace YTDLPHost
                 args.Handled = true; 
             };
 
-            // Handle unhandled exceptions on background threads.
             AppDomain.CurrentDomain.UnhandledException += (s, args) =>
             {
                 if (args.ExceptionObject is Exception ex)
@@ -44,16 +41,11 @@ namespace YTDLPHost
                 }
             };
 
-            // Log launch arguments.
             string? urlArg = e.Args.FirstOrDefault();
             if (!string.IsNullOrEmpty(urlArg))
-            {
                 AppLogger.Log($"[BOOT] Launch Arguments Received: {urlArg}");
-            }
             else
-            {
                 AppLogger.Log("[BOOT] Launched normally (no protocol arguments).");
-            }
 
             base.OnStartup(e);
 
@@ -68,14 +60,27 @@ namespace YTDLPHost
 
             if (!isFirstInstance)
             {
-                AppLogger.Log("[BOOT] Secondary instance detected. Forwarding arguments and exiting.");
+                AppLogger.Log("[BOOT] Secondary instance detected. Forwarding arguments to primary instance...");
                 var url = urlArg ?? "ytdlp://show";
                 
-                // Execute instance forwarding on a background task to prevent UI thread deadlocks.
                 Task.Run(async () => 
                 {
-                    await SingleInstanceManager.SendUrlToRunningInstanceAsync(url);
-                    Environment.Exit(0);
+                    try 
+                    {
+                        await SingleInstanceManager.SendUrlToRunningInstanceAsync(url);
+                        AppLogger.Log("[BOOT] Successfully flushed payload to Primary instance.");
+                        
+                        // FIX: Give the OS 500ms to physically transmit the named pipe buffer before app termination
+                        await Task.Delay(500); 
+                    }
+                    catch (Exception ex)
+                    {
+                        AppLogger.Log($"[NAMED PIPE ERROR] Failed to send payload: {ex.Message}");
+                    }
+                    finally
+                    {
+                        Environment.Exit(0);
+                    }
                 });
                 return;
             }
@@ -99,7 +104,7 @@ namespace YTDLPHost
 
         private void OnUrlReceived(object? sender, string url)
         {
-            AppLogger.Log($"[NAMED PIPE] Received argument from secondary instance: {url}");
+            AppLogger.Log($"[NAMED PIPE] Primary instance received argument: {url}");
             if (_mainViewModel == null) return;
             Dispatcher.BeginInvoke(() =>
             {
