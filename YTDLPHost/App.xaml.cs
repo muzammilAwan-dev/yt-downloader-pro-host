@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
@@ -15,6 +16,7 @@ namespace YTDLPHost
         private SingleInstanceManager? _singleInstanceManager;
         private MainViewModel? _mainViewModel;
         private MainWindow? _mainWindow;
+        private FileSystemWatcher? _payloadWatcher;
 
         protected override void OnStartup(StartupEventArgs e)
         {
@@ -22,7 +24,6 @@ namespace YTDLPHost
             AppLogger.Log("=== YTDLP HOST APPLICATION START ===");
             AppLogger.Log($"OS Version: {Environment.OSVersion}");
 
-            // HARDWARE ACCELERATION FIX: Force CPU rendering to prevent GPU driver crashes
             RenderOptions.ProcessRenderMode = RenderMode.SoftwareOnly;
 
             this.DispatcherUnhandledException += (s, args) =>
@@ -42,10 +43,8 @@ namespace YTDLPHost
             };
 
             string? urlArg = e.Args.FirstOrDefault();
-            if (!string.IsNullOrEmpty(urlArg))
-                AppLogger.Log($"[BOOT] Launch Arguments Received: {urlArg}");
-            else
-                AppLogger.Log("[BOOT] Launched normally (no protocol arguments).");
+            if (!string.IsNullOrEmpty(urlArg)) AppLogger.Log($"[BOOT] Launch Arguments Received: {urlArg}");
+            else AppLogger.Log("[BOOT] Launched normally (no protocol arguments).");
 
             base.OnStartup(e);
 
@@ -55,32 +54,27 @@ namespace YTDLPHost
                 ProtocolHandler.Register();
             }
 
+            // FILE IPC SETUP: Create a secure folder for cross-process URL sharing
+            string payloadsDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YT Downloader Pro", "Payloads");
+            if (!Directory.Exists(payloadsDir)) Directory.CreateDirectory(payloadsDir);
+
             _singleInstanceManager = new SingleInstanceManager();
             var isFirstInstance = _singleInstanceManager.Initialize();
 
             if (!isFirstInstance)
             {
-                AppLogger.Log("[BOOT] Secondary instance detected. Forwarding arguments to primary instance...");
+                AppLogger.Log("[BOOT] Secondary instance detected. Routing payload...");
                 var url = urlArg ?? "ytdlp://show";
+                
+                // BULLETPROOF FALLBACK: Write the massive URL to a file before exiting
+                string payloadFile = Path.Combine(payloadsDir, Guid.NewGuid().ToString() + ".url");
+                File.WriteAllText(payloadFile, url);
+                AppLogger.Log("[BOOT] Payload saved to disk queue.");
                 
                 Task.Run(async () => 
                 {
-                    try 
-                    {
-                        await SingleInstanceManager.SendUrlToRunningInstanceAsync(url);
-                        AppLogger.Log("[BOOT] Successfully flushed payload to Primary instance.");
-                        
-                        // FIX: Give the OS 500ms to physically transmit the named pipe buffer before app termination
-                        await Task.Delay(500); 
-                    }
-                    catch (Exception ex)
-                    {
-                        AppLogger.Log($"[NAMED PIPE ERROR] Failed to send payload: {ex.Message}");
-                    }
-                    finally
-                    {
-                        Environment.Exit(0);
-                    }
+                    try { await SingleInstanceManager.SendUrlToRunningInstanceAsync(url); await Task.Delay(500); } catch { }
+                    finally { Environment.Exit(0); }
                 });
                 return;
             }
@@ -96,20 +90,47 @@ namespace YTDLPHost
             _mainWindow.Show();
             _mainWindow.Activate();
 
+            // Setup the File IPC Watcher to catch payloads that bypass the Named Pipe
+            _payloadWatcher = new FileSystemWatcher(payloadsDir, "*.url") { EnableRaisingEvents = true };
+            _payloadWatcher.Created += (s, args) => ProcessPayloadFile(args.FullPath);
+
+            // Process any files that were injected while the app was booting up
+            foreach (var file in Directory.GetFiles(payloadsDir, "*.url")) ProcessPayloadFile(file);
+
             if (!string.IsNullOrEmpty(urlArg) && urlArg.StartsWith("ytdlp://"))
             {
                 _mainViewModel.ProcessUrl(urlArg);
             }
         }
 
+        private void ProcessPayloadFile(string filePath)
+        {
+            Task.Run(async () => 
+            {
+                try 
+                {
+                    await Task.Delay(100); // Give Windows time to release the file lock
+                    string url = File.ReadAllText(filePath);
+                    File.Delete(filePath);
+                    
+                    AppLogger.Log($"[FILE IPC] Primary instance successfully extracted payload from disk.");
+                    Dispatcher.BeginInvoke(() =>
+                    {
+                        if (url != "ytdlp://show" && url.StartsWith("ytdlp://")) _mainViewModel?.ProcessUrl(url);
+                        ShowMainWindow();
+                    });
+                }
+                catch (Exception ex) { AppLogger.Log($"[FILE IPC ERROR] {ex.Message}"); }
+            });
+        }
+
         private void OnUrlReceived(object? sender, string url)
         {
-            AppLogger.Log($"[NAMED PIPE] Primary instance received argument: {url}");
+            AppLogger.Log($"[NAMED PIPE] Primary instance received argument.");
             if (_mainViewModel == null) return;
             Dispatcher.BeginInvoke(() =>
             {
-                if (url != "ytdlp://show" && url.StartsWith("ytdlp://"))
-                    _mainViewModel.ProcessUrl(url);
+                if (url != "ytdlp://show" && url.StartsWith("ytdlp://")) _mainViewModel.ProcessUrl(url);
                 ShowMainWindow();
             });
         }
@@ -135,8 +156,7 @@ namespace YTDLPHost
 
         protected override void OnExit(ExitEventArgs e)
         {
-            AppLogger.Log("=== APPLICATION EXITING ===");
-            AppLogger.Log("=====================================\n");
+            _payloadWatcher?.Dispose();
             _mainViewModel?.Dispose();
             _singleInstanceManager?.Dispose();
             base.OnExit(e);
