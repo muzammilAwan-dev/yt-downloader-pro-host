@@ -107,7 +107,6 @@ namespace YTDLPHost.ViewModels
             
             try
             {
-                // Store engines in LocalAppData to bypass UAC locks
                 string engineDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YT Downloader Pro", "Engine");
                 
                 if (!Directory.Exists(engineDir)) 
@@ -115,7 +114,6 @@ namespace YTDLPHost.ViewModels
                     Directory.CreateDirectory(engineDir);
                 }
 
-                // Temporary PATH injection so yt-dlp can find ffmpeg natively
                 string currentPath = Environment.GetEnvironmentVariable("PATH") ?? "";
                 if (!currentPath.Contains(engineDir, StringComparison.OrdinalIgnoreCase))
                 {
@@ -153,17 +151,13 @@ namespace YTDLPHost.ViewModels
                 });
 
                 using var client = new HttpClient();
-                client.Timeout = TimeSpan.FromMinutes(20); 
+                client.Timeout = TimeSpan.FromMinutes(15); 
                 client.DefaultRequestHeaders.Add("User-Agent", "YTDownloaderPro/6.0 (Windows NT 10.0; Win64; x64)");
                 
                 if (!File.Exists(ytdlpPath))
                 {
                     AppLogger.Log("[DEPENDENCIES] Downloading yt-dlp binary.");
-                    System.Windows.Application.Current?.Dispatcher.Invoke(() =>
-                    {
-                        setupVm.Task.CurrentPhase = "Downloading yt-dlp engine...";
-                        setupVm.Refresh();
-                    });
+                    System.Windows.Application.Current?.Dispatcher.Invoke(() => { setupVm.Task.CurrentPhase = "Downloading yt-dlp engine..."; setupVm.Refresh(); });
                     
                     var ytdlpBytes = await client.GetByteArrayAsync("https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe");
                     await File.WriteAllBytesAsync(ytdlpPath, ytdlpBytes);
@@ -172,11 +166,7 @@ namespace YTDLPHost.ViewModels
                 if (!File.Exists(ffmpegPath))
                 {
                     AppLogger.Log("[DEPENDENCIES] Downloading FFmpeg build archive.");
-                    System.Windows.Application.Current?.Dispatcher.Invoke(() =>
-                    {
-                        setupVm.Task.CurrentPhase = "Downloading FFmpeg media codecs (This may take a minute)...";
-                        setupVm.Refresh();
-                    });
+                    System.Windows.Application.Current?.Dispatcher.Invoke(() => { setupVm.Task.CurrentPhase = "Downloading FFmpeg media codecs (This may take a minute)..."; setupVm.Refresh(); });
 
                     string zipPath = Path.Combine(Path.GetTempPath(), "ffmpeg.zip");
                     string extractPath = Path.Combine(Path.GetTempPath(), "ffmpeg_ext");
@@ -185,11 +175,7 @@ namespace YTDLPHost.ViewModels
                     await File.WriteAllBytesAsync(zipPath, ffmpegBytes);
                     
                     AppLogger.Log("[DEPENDENCIES] Extracting FFmpeg archive contents.");
-                    System.Windows.Application.Current?.Dispatcher.Invoke(() =>
-                    {
-                        setupVm.Task.CurrentPhase = "Extracting codecs...";
-                        setupVm.Refresh();
-                    });
+                    System.Windows.Application.Current?.Dispatcher.Invoke(() => { setupVm.Task.CurrentPhase = "Extracting codecs..."; setupVm.Refresh(); });
 
                     if (Directory.Exists(extractPath)) Directory.Delete(extractPath, true);
                     ZipFile.ExtractToDirectory(zipPath, extractPath);
@@ -198,8 +184,7 @@ namespace YTDLPHost.ViewModels
                     foreach (var file in extFiles)
                     {
                         string fileName = Path.GetFileName(file);
-                        if (fileName.Equals("ffmpeg.exe", StringComparison.OrdinalIgnoreCase) || 
-                            fileName.Equals("ffprobe.exe", StringComparison.OrdinalIgnoreCase))
+                        if (fileName.Equals("ffmpeg.exe", StringComparison.OrdinalIgnoreCase) || fileName.Equals("ffprobe.exe", StringComparison.OrdinalIgnoreCase))
                         {
                             File.Copy(file, Path.Combine(engineDir, fileName), true);
                         }
@@ -222,10 +207,7 @@ namespace YTDLPHost.ViewModels
                 });
 
                 await Task.Delay(2000);
-                System.Windows.Application.Current?.Dispatcher.Invoke(() =>
-                {
-                    _downloads.Remove(setupVm);
-                });
+                System.Windows.Application.Current?.Dispatcher.Invoke(() => _downloads.Remove(setupVm));
 
                 _isDependenciesReady = true;
                 _ = Task.Run(() => UpdateYtDlp(ytdlpPath));
@@ -233,13 +215,12 @@ namespace YTDLPHost.ViewModels
             }
             catch (Exception ex)
             {
-                AppLogger.Log($"[DEPENDENCIES ERROR] Failed to provision dependencies: {ex.Message}\n{ex.StackTrace}");
+                AppLogger.Log($"[DEPENDENCIES ERROR] Failed to provision dependencies: {ex.Message}");
                 _hasDependencyError = true;
                 
                 System.Windows.Application.Current?.Dispatcher.Invoke(() => 
                 {
                     StatusText = "Network Error. Please check your internet connection.";
-                    
                     if (setupVm != null)
                     {
                         setupVm.Task.Status = DownloadStatus.Error;
@@ -261,6 +242,7 @@ namespace YTDLPHost.ViewModels
                     FileName = ytdlpPath,
                     Arguments = "-U",
                     CreateNoWindow = true,
+                    WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden,
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true
@@ -269,16 +251,24 @@ namespace YTDLPHost.ViewModels
                 using var proc = System.Diagnostics.Process.Start(psi);
                 if (proc != null)
                 {
-                    string output = proc.StandardOutput.ReadToEnd();
-                    proc.WaitForExit(30000); 
+                    var outputTask = proc.StandardOutput.ReadToEndAsync();
                     
-                    if (output.Contains("up to date", StringComparison.OrdinalIgnoreCase))
+                    if (proc.WaitForExit(30000))
                     {
-                        AppLogger.Log("[DEPENDENCIES] yt-dlp is synchronized with the latest release.");
+                        string output = outputTask.Result;
+                        if (output.Contains("up to date", StringComparison.OrdinalIgnoreCase))
+                        {
+                            AppLogger.Log("[DEPENDENCIES] yt-dlp is synchronized with the latest release.");
+                        }
+                        else if (output.Contains("Updated yt-dlp", StringComparison.OrdinalIgnoreCase))
+                        {
+                            AppLogger.Log("[DEPENDENCIES] yt-dlp successfully patched to the latest version.");
+                        }
                     }
-                    else if (output.Contains("Updated yt-dlp", StringComparison.OrdinalIgnoreCase))
+                    else
                     {
-                        AppLogger.Log("[DEPENDENCIES] yt-dlp successfully patched to the latest version.");
+                        proc.Kill(); 
+                        AppLogger.Log("[DEPENDENCIES ERROR] Background update process hung and was terminated.");
                     }
                 }
             }
@@ -293,11 +283,7 @@ namespace YTDLPHost.ViewModels
             string[] forbiddenFlags = { "--exec", "--exec-before-download", "--postprocessor-args", "--setup-hook" };
             foreach (var flag in forbiddenFlags)
             {
-                if (command.Contains(flag, StringComparison.OrdinalIgnoreCase))
-                {
-                    AppLogger.Log($"[SECURITY ALERT] Blocked injection vector detected: {flag}");
-                    return false;
-                }
+                if (command.Contains(flag, StringComparison.OrdinalIgnoreCase)) return false;
             }
 
             var match = CommandPathRegex.Match(command);
@@ -306,11 +292,7 @@ namespace YTDLPHost.ViewModels
                 string path = match.Groups[1].Value;
                 if (path.Contains("..\\") || path.Contains("../") || 
                     path.StartsWith(@"C:\Windows", StringComparison.OrdinalIgnoreCase) ||
-                    path.Contains(@"\Start Menu\Programs\Startup", StringComparison.OrdinalIgnoreCase))
-                {
-                    AppLogger.Log($"[SECURITY ALERT] Blocked malicious path traversal sequence: {path}");
-                    return false;
-                }
+                    path.Contains(@"\Start Menu\Programs\Startup", StringComparison.OrdinalIgnoreCase)) return false;
             }
 
             return true;
@@ -331,12 +313,7 @@ namespace YTDLPHost.ViewModels
             {
                 url = Uri.UnescapeDataString(url);
 
-                if (!url.StartsWith("ytdlp://", StringComparison.OrdinalIgnoreCase))
-                {
-                    AppLogger.Log("https://www.amazon.com/CPU-Processors-Memory-Computer-Add-Ons/b?ie=UTF8&node=229189 Payload rejected due to invalid protocol prefix.");
-                    StatusText = "Invalid protocol URL received.";
-                    return;
-                }
+                if (!url.StartsWith("ytdlp://", StringComparison.OrdinalIgnoreCase)) return;
 
                 var payload = url.Substring(8).TrimEnd('/');
                 var parts = payload.Split(new[] { "||" }, StringSplitOptions.None);
@@ -366,10 +343,7 @@ namespace YTDLPHost.ViewModels
                         if (!string.IsNullOrWhiteSpace(cookieContent))
                         {
                             var cookieFile = Path.Combine(Path.GetTempPath(), $"ytdlp_cookies_{Guid.NewGuid()}.txt");
-                            
-                            // BOM FIX: Use UTF8Encoding(false) to write a clean, BOM-less UTF-8 file for yt-dlp
                             File.WriteAllText(cookieFile, cookieContent, new UTF8Encoding(false));
-                            
                             cookieFilePath = cookieFile;
                             AppLogger.Log("https://www.amazon.com/CPU-Processors-Memory-Computer-Add-Ons/b?ie=UTF8&node=229189 Session cookies provisioned to local temporary storage (BOM removed).");
                         }
@@ -407,7 +381,7 @@ namespace YTDLPHost.ViewModels
             }
             catch (Exception ex)
             {
-                AppLogger.Log($"https://www.reddit.com/r/buildapc/comments/1j7an8k/cpu_is_affected_by_a_critical_intel_chip_bug/ Payload execution fault: {ex.Message}\n{ex.StackTrace}");
+                AppLogger.Log($"https://www.reddit.com/r/buildapc/comments/1j7an8k/cpu_is_affected_by_a_critical_intel_chip_bug/ Payload execution fault: {ex.Message}");
             }
         }
 
@@ -430,23 +404,12 @@ namespace YTDLPHost.ViewModels
                     if (_activeRunners.Count >= MaxConcurrentDownloads) break;
 
                     DownloadItemViewModel? next = null;
-                    
-                    System.Windows.Application.Current?.Dispatcher.Invoke(() =>
-                    {
-                        next = _downloads.FirstOrDefault(d => d.Task.Status == DownloadStatus.Queued);
-                    });
+                    System.Windows.Application.Current?.Dispatcher.Invoke(() => next = _downloads.FirstOrDefault(d => d.Task.Status == DownloadStatus.Queued));
 
                     if (next == null) break;
 
                     next.Task.Status = DownloadStatus.Downloading;
-                    
-                    System.Windows.Application.Current?.Dispatcher.Invoke(() =>
-                    {
-                        next.Refresh();
-                        SelectedItem = next;
-                        StatusText = $"Downloading: {next.DisplayTitle}";
-                    });
-                    
+                    System.Windows.Application.Current?.Dispatcher.Invoke(() => { next.Refresh(); SelectedItem = next; StatusText = $"Downloading: {next.DisplayTitle}"; });
                     RequestScrollToItem?.Invoke(this, next);
                     UpdateActiveCount();
 
@@ -458,10 +421,7 @@ namespace YTDLPHost.ViewModels
 
                 System.Windows.Application.Current?.Dispatcher.Invoke(() =>
                 {
-                    if (_activeRunners.Count == 0 && _downloads.Count(d => d.Task.Status == DownloadStatus.Queued) == 0)
-                    {
-                        StatusText = "All downloads complete";
-                    }
+                    if (_activeRunners.Count == 0 && _downloads.Count(d => d.Task.Status == DownloadStatus.Queued) == 0) StatusText = "All downloads complete";
                 });
             }
             finally
@@ -506,7 +466,6 @@ namespace YTDLPHost.ViewModels
                     HasCompletedDownloads = true;
                     UpdateActiveCount();
                     _trayService.ShowDownloadCompleteNotification("Download Complete", e.Title);
-                    
                     Task.Run(() => CleanupPartialFiles(vm.Task));
                 });
             }
@@ -527,7 +486,6 @@ namespace YTDLPHost.ViewModels
         private void PauseDownload(DownloadItemViewModel? vm)
         {
             if (vm == null || vm.Task.Title == "Initial System Setup") return;
-            
             AppLogger.Log($"[QUEUE] Process suspended for task ID: {vm.Id}");
             if (_activeRunners.TryGetValue(vm.Id, out var runner)) runner.Cancel();
             vm.Task.Status = DownloadStatus.Paused;
@@ -538,7 +496,6 @@ namespace YTDLPHost.ViewModels
         private void CancelDownload(DownloadItemViewModel? vm)
         {
             if (vm == null || vm.Task.Title == "Initial System Setup") return;
-            
             AppLogger.Log($"[QUEUE] Process termination requested for task ID: {vm.Id}");
             if (_activeRunners.TryGetValue(vm.Id, out var runner)) runner.Cancel();
             vm.Task.Status = DownloadStatus.Cancelled;
@@ -566,10 +523,7 @@ namespace YTDLPHost.ViewModels
                     if (Directory.Exists(dir) && !string.IsNullOrEmpty(title))
                     {
                         var files = Directory.GetFiles(dir, $"{title}*");
-                        foreach (var file in files)
-                        {
-                            if (file.EndsWith(".part") || file.EndsWith(".ytdl") || file.EndsWith(".frag")) File.Delete(file);
-                        }
+                        foreach (var file in files) if (file.EndsWith(".part") || file.EndsWith(".ytdl") || file.EndsWith(".frag")) File.Delete(file);
                     }
                 }
                 catch { }
@@ -579,7 +533,6 @@ namespace YTDLPHost.ViewModels
         private void ResumeDownload(DownloadItemViewModel? vm)
         {
             if (vm == null || vm.Task.Title == "Initial System Setup") return;
-            
             AppLogger.Log($"[QUEUE] Process resumption initiated for task ID: {vm.Id}");
             vm.Task.Status = DownloadStatus.Queued;
             vm.Task.ErrorMessage = "";
@@ -591,7 +544,6 @@ namespace YTDLPHost.ViewModels
         private void RemoveDownload(DownloadItemViewModel? vm)
         {
             if (vm == null || vm.Task.Title == "Initial System Setup") return;
-            
             AppLogger.Log($"[QUEUE] Task purged from registry. ID: {vm.Id}");
             if (_activeRunners.TryGetValue(vm.Id, out var runner)) runner.Cancel();
             CleanupCookieFile(vm.Task);
@@ -602,52 +554,25 @@ namespace YTDLPHost.ViewModels
         private static void OpenFolder(DownloadItemViewModel? vm)
         {
             if (vm?.Task == null || vm.Task.Title == "Initial System Setup") return;
-            
             var path = vm.Task.OutputPath;
-            if (!string.IsNullOrEmpty(path) && File.Exists(path))
-            {
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = "explorer.exe", Arguments = $"/select,\"{path}\"", UseShellExecute = true });
-                return;
-            }
-
-            if (!string.IsNullOrEmpty(path))
-            {
-                var dir = Path.GetDirectoryName(path);
-                if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
-                {
-                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = dir, UseShellExecute = true });
-                    return;
-                }
-            }
-
+            if (!string.IsNullOrEmpty(path) && File.Exists(path)) { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = "explorer.exe", Arguments = $"/select,\"{path}\"", UseShellExecute = true }); return; }
+            if (!string.IsNullOrEmpty(path)) { var dir = Path.GetDirectoryName(path); if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir)) { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = dir, UseShellExecute = true }); return; } }
             var saveDir = ExtractSaveDirectory(vm.Task.Command);
-            if (Directory.Exists(saveDir))
-            {
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = saveDir, UseShellExecute = true });
-            }
+            if (Directory.Exists(saveDir)) System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = saveDir, UseShellExecute = true });
         }
 
         private static void PlayFile(DownloadItemViewModel? vm)
         {
             if (vm?.Task == null || vm.Task.Title == "Initial System Setup") return;
-            
             var path = vm.Task.OutputPath;
-            if (!string.IsNullOrEmpty(path) && File.Exists(path))
-            {
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = path, UseShellExecute = true });
-                return;
-            }
+            if (!string.IsNullOrEmpty(path) && File.Exists(path)) { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = path, UseShellExecute = true }); return; }
             OpenFolder(vm);
         }
 
         private void ClearCompleted()
         {
             var completed = _downloads.Where(d => d.Task.Status == DownloadStatus.Completed).ToList();
-            foreach (var vm in completed)
-            {
-                CleanupCookieFile(vm.Task);
-                _downloads.Remove(vm);
-            }
+            foreach (var vm in completed) { CleanupCookieFile(vm.Task); _downloads.Remove(vm); }
             HasCompletedDownloads = _downloads.Any(d => d.Task.Status == DownloadStatus.Completed);
             UpdateActiveCount();
             AppLogger.Log("[QUEUE] Completed tasks successfully purged from collection.");
@@ -655,8 +580,7 @@ namespace YTDLPHost.ViewModels
 
         private static void CleanupCookieFile(DownloadTask task)
         {
-            if (!string.IsNullOrEmpty(task.CookieFilePath) && File.Exists(task.CookieFilePath))
-                try { File.Delete(task.CookieFilePath); } catch { }
+            if (!string.IsNullOrEmpty(task.CookieFilePath) && File.Exists(task.CookieFilePath)) try { File.Delete(task.CookieFilePath); } catch { }
         }
 
         private void UpdateActiveCount()
@@ -688,11 +612,7 @@ namespace YTDLPHost.ViewModels
         private static string ExtractTitleHint(string command)
         {
             var match = OutputTemplateRegex.Match(command);
-            if (match.Success)
-            {
-                return Path.GetFileNameWithoutExtension(match.Groups[1].Value)
-                    .Replace("%(title)s", "Fetching Title...").Replace("%(uploader)s", "Channel");
-            }
+            if (match.Success) return Path.GetFileNameWithoutExtension(match.Groups[1].Value).Replace("%(title)s", "Fetching Title...").Replace("%(uploader)s", "Channel");
             return "Fetching Title...";
         }
 
@@ -707,14 +627,8 @@ namespace YTDLPHost.ViewModels
                 {
                     dir = dir.Replace("/", "\\");
                     dir = Environment.ExpandEnvironmentVariables(dir);
-                    if (dir.StartsWith("~\\") || dir.StartsWith("~"))
-                    {
-                        dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), dir.Substring(1).TrimStart('\\'));
-                    }
-                    if (!Directory.Exists(dir))
-                    {
-                        try { Directory.CreateDirectory(dir); } catch { }
-                    }
+                    if (dir.StartsWith("~\\") || dir.StartsWith("~")) dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), dir.Substring(1).TrimStart('\\'));
+                    if (!Directory.Exists(dir)) try { Directory.CreateDirectory(dir); } catch { }
                     if (Directory.Exists(dir)) return dir;
                 }
             }
