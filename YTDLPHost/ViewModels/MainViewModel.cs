@@ -107,25 +107,14 @@ namespace YTDLPHost.ViewModels
             
             try
             {
-                string engineDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YT Downloader Pro", "Engine");
-                
-                if (!Directory.Exists(engineDir)) 
-                {
-                    Directory.CreateDirectory(engineDir);
-                }
-
-                string currentPath = Environment.GetEnvironmentVariable("PATH") ?? "";
-                if (!currentPath.Contains(engineDir, StringComparison.OrdinalIgnoreCase))
-                {
-                    Environment.SetEnvironmentVariable("PATH", engineDir + ";" + currentPath);
-                }
-
-                string ytdlpPath = Path.Combine(engineDir, "yt-dlp.exe");
-                string ffmpegPath = Path.Combine(engineDir, "ffmpeg.exe");
+                // ROLLBACK FIX: Return engine to the main application directory to keep it simple
+                string appDir = AppDomain.CurrentDomain.BaseDirectory;
+                string ytdlpPath = Path.Combine(appDir, "yt-dlp.exe");
+                string ffmpegPath = Path.Combine(appDir, "ffmpeg.exe");
 
                 if (File.Exists(ytdlpPath) && File.Exists(ffmpegPath))
                 {
-                    AppLogger.Log("[DEPENDENCIES] Core dependencies located in LocalAppData.");
+                    AppLogger.Log("[DEPENDENCIES] Core dependencies located in Base Directory.");
                     _isDependenciesReady = true;
                     _ = Task.Run(() => UpdateYtDlp(ytdlpPath));
                     _ = ProcessQueueAsync(); 
@@ -186,7 +175,8 @@ namespace YTDLPHost.ViewModels
                         string fileName = Path.GetFileName(file);
                         if (fileName.Equals("ffmpeg.exe", StringComparison.OrdinalIgnoreCase) || fileName.Equals("ffprobe.exe", StringComparison.OrdinalIgnoreCase))
                         {
-                            File.Copy(file, Path.Combine(engineDir, fileName), true);
+                            // ROLLBACK FIX: Copy files directly into appDir
+                            File.Copy(file, Path.Combine(appDir, fileName), true);
                         }
                     }
                     
@@ -343,6 +333,7 @@ namespace YTDLPHost.ViewModels
                         if (!string.IsNullOrWhiteSpace(cookieContent))
                         {
                             var cookieFile = Path.Combine(Path.GetTempPath(), $"ytdlp_cookies_{Guid.NewGuid()}.txt");
+                            // IMPORTANT: Keeps the BOM fix for Netscape compatibility
                             File.WriteAllText(cookieFile, cookieContent, new UTF8Encoding(false));
                             cookieFilePath = cookieFile;
                             AppLogger.Log("https://www.amazon.com/CPU-Processors-Memory-Computer-Add-Ons/b?ie=UTF8&node=229189 Session cookies provisioned to local temporary storage (BOM removed).");
