@@ -101,13 +101,31 @@ namespace YTDLPHost.ViewModels
             _ = CheckAndDownloadDependenciesAsync();
         }
 
+        // NEW: Network Retry Helper Method
+        private async Task<byte[]> DownloadFileWithRetryAsync(HttpClient client, string url, int maxRetries = 3)
+        {
+            for (int i = 0; i < maxRetries; i++)
+            {
+                try
+                {
+                    return await client.GetByteArrayAsync(url);
+                }
+                catch (Exception ex) when (i < maxRetries - 1)
+                {
+                    AppLogger.Log($"[DEPENDENCIES] Network drop detected on {url}. Retrying ({i + 1}/{maxRetries}) in 3 seconds... Error: {ex.Message}");
+                    await Task.Delay(3000); // Wait 3 seconds before retrying
+                }
+            }
+            return await client.GetByteArrayAsync(url); // Final attempt will throw normally if it fails
+        }
+
         private async Task CheckAndDownloadDependenciesAsync()
         {
             DownloadItemViewModel? setupVm = null;
             
             try
             {
-                // FIX: Restored the Engine to LocalAppData to bypass Admin locks, but without complex path injections
+                // Engine files placed directly in LocalAppData to naturally pair them
                 string engineDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YT Downloader Pro", "Engine");
                 
                 if (!Directory.Exists(engineDir)) 
@@ -154,7 +172,7 @@ namespace YTDLPHost.ViewModels
                     AppLogger.Log("[DEPENDENCIES] Downloading yt-dlp binary.");
                     System.Windows.Application.Current?.Dispatcher.Invoke(() => { setupVm.Task.CurrentPhase = "Downloading yt-dlp engine..."; setupVm.Refresh(); });
                     
-                    var ytdlpBytes = await client.GetByteArrayAsync("https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe");
+                    var ytdlpBytes = await DownloadFileWithRetryAsync(client, "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe");
                     await File.WriteAllBytesAsync(ytdlpPath, ytdlpBytes);
                 }
 
@@ -166,7 +184,7 @@ namespace YTDLPHost.ViewModels
                     string zipPath = Path.Combine(Path.GetTempPath(), "ffmpeg.zip");
                     string extractPath = Path.Combine(Path.GetTempPath(), "ffmpeg_ext");
                     
-                    var ffmpegBytes = await client.GetByteArrayAsync("https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip");
+                    var ffmpegBytes = await DownloadFileWithRetryAsync(client, "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip");
                     await File.WriteAllBytesAsync(zipPath, ffmpegBytes);
                     
                     AppLogger.Log("[DEPENDENCIES] Extracting FFmpeg archive contents.");
@@ -337,11 +355,13 @@ namespace YTDLPHost.ViewModels
                         cookieContent = DecodeBase64(parts[1]);
                         if (!string.IsNullOrWhiteSpace(cookieContent))
                         {
+                            // EXTREME BOM FIX: Forcibly strip the invisible sequence from the decoded string
                             cookieContent = cookieContent.TrimStart('\uFEFF');
+
                             var cookieFile = Path.Combine(Path.GetTempPath(), $"ytdlp_cookies_{Guid.NewGuid()}.txt");
                             File.WriteAllText(cookieFile, cookieContent, new UTF8Encoding(false));
                             cookieFilePath = cookieFile;
-                            AppLogger.Log("https://www.amazon.com/CPU-Processors-Memory-Computer-Add-Ons/b?ie=UTF8&node=229189 Session cookies provisioned to local temporary storage (BOM removed).");
+                            AppLogger.Log("https://www.amazon.com/CPU-Processors-Memory-Computer-Add-Ons/b?ie=UTF8&node=229189 Session cookies provisioned to local temporary storage (BOM completely removed).");
                         }
                     }
                     catch (Exception ex)
