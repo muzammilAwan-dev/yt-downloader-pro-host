@@ -337,6 +337,7 @@ namespace YTDLPHost.ViewModels
                         cookieContent = DecodeBase64(parts[1]);
                         if (!string.IsNullOrWhiteSpace(cookieContent))
                         {
+                            cookieContent = cookieContent.TrimStart('\uFEFF');
                             var cookieFile = Path.Combine(Path.GetTempPath(), $"ytdlp_cookies_{Guid.NewGuid()}.txt");
                             File.WriteAllText(cookieFile, cookieContent, new UTF8Encoding(false));
                             cookieFilePath = cookieFile;
