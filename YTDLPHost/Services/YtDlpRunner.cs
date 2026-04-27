@@ -30,7 +30,6 @@ namespace YTDLPHost.Services
         private bool _extractionComplete;
         private bool _disposed;
         
-        // BULLETPROOFING: Independent memory tracker for the current item sequence
         private bool _hasStartedVideoMedia;
 
         private DateTime _lastUiUpdate = DateTime.MinValue;
@@ -46,7 +45,7 @@ namespace YTDLPHost.Services
         {
             _errorBuffer.Clear();
             _extractionComplete = false;
-            _hasStartedVideoMedia = false; // Reset for new task
+            _hasStartedVideoMedia = false; 
             
             task.ClearLog();
             task.CurrentPhase = "Starting...";
@@ -55,22 +54,35 @@ namespace YTDLPHost.Services
             var command = task.Command.Trim();
             command = CmdTrimRegex.Replace(command, "");
 
-            task.AppendLog("=== Download Task Started ===");
-            task.AppendLog($"Command executed: yt-dlp.exe {command}");
-            task.AppendLog("");
-
             try
             {
                 var saveDirectory = ExtractSaveDirectory(command);
 
+                // THE FIX: Define the absolute paths to the LocalAppData Engine
+                string engineDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YT Downloader Pro", "Engine");
+                string ytdlpPath = Path.Combine(engineDir, "yt-dlp.exe");
+
+                // THE FIX: Inject the FFmpeg location so the background runner never loses the codecs
+                if (!command.Contains("--ffmpeg-location"))
+                {
+                    command += $" --ffmpeg-location \"{engineDir}\"";
+                }
+
                 if (!string.IsNullOrEmpty(task.CookieFilePath) && File.Exists(task.CookieFilePath))
+                {
                     command += $" --cookies \"{task.CookieFilePath}\"";
+                }
+
+                task.AppendLog("=== Download Task Started ===");
+                task.AppendLog($"Command executed: yt-dlp.exe {command}");
+                task.AppendLog("");
 
                 var psi = new ProcessStartInfo
                 {
-                    FileName = "yt-dlp.exe",
+                    FileName = ytdlpPath, // THE FIX: Use absolute path to bypass Windows Shell aliases
                     Arguments = command,
                     CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden, // THE FIX: Bulletproof hidden window
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
@@ -160,7 +172,6 @@ namespace YTDLPHost.Services
                 {
                     task.PlaylistInfo = $"Item {match.Groups[1].Value}/{match.Groups[2].Value}";
                     
-                    // REBOOT EVERYTHING for the next playlist item
                     _extractionComplete = false; 
                     _hasStartedVideoMedia = false; 
                     task.Progress = 0.0;
@@ -221,11 +232,10 @@ namespace YTDLPHost.Services
                         }
                         else
                         {
-                            // INDEPENDENT MEMORY TRACKER: Unbreakable state sequence
                             if (!_hasStartedVideoMedia) 
                             {
                                 task.CurrentPhase = "Downloading Video...";
-                                _hasStartedVideoMedia = true; // Locks in the video phase permanently for this item
+                                _hasStartedVideoMedia = true; 
                             }
                             else 
                             {
