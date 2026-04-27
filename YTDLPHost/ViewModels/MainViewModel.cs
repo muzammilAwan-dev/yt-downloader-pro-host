@@ -146,7 +146,7 @@ namespace YTDLPHost.ViewModels
                 });
 
                 using var client = new HttpClient();
-                client.Timeout = TimeSpan.FromMinutes(15); 
+                client.Timeout = TimeSpan.FromMinutes(20); 
                 client.DefaultRequestHeaders.Add("User-Agent", "YTDownloaderPro/6.0 (Windows NT 10.0; Win64; x64)");
                 
                 if (!File.Exists(ytdlpPath))
