@@ -107,7 +107,7 @@ namespace YTDLPHost.ViewModels
             
             try
             {
-                // Core fix: Store engines in LocalAppData to bypass UAC locks
+                // Store engines in LocalAppData to bypass UAC locks
                 string engineDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YT Downloader Pro", "Engine");
                 
                 if (!Directory.Exists(engineDir)) 
@@ -366,9 +366,12 @@ namespace YTDLPHost.ViewModels
                         if (!string.IsNullOrWhiteSpace(cookieContent))
                         {
                             var cookieFile = Path.Combine(Path.GetTempPath(), $"ytdlp_cookies_{Guid.NewGuid()}.txt");
-                            File.WriteAllText(cookieFile, cookieContent, Encoding.UTF8);
+                            
+                            // BOM FIX: Use UTF8Encoding(false) to write a clean, BOM-less UTF-8 file for yt-dlp
+                            File.WriteAllText(cookieFile, cookieContent, new UTF8Encoding(false));
+                            
                             cookieFilePath = cookieFile;
-                            AppLogger.Log("https://www.amazon.com/CPU-Processors-Memory-Computer-Add-Ons/b?ie=UTF8&node=229189 Session cookies provisioned to local temporary storage.");
+                            AppLogger.Log("https://www.amazon.com/CPU-Processors-Memory-Computer-Add-Ons/b?ie=UTF8&node=229189 Session cookies provisioned to local temporary storage (BOM removed).");
                         }
                     }
                     catch (Exception ex)
