@@ -248,10 +248,12 @@ namespace YTDLPHost.ViewModels
         {
             try
             {
+                // THE INVISIBILITY CLOAK APPLIED TO UPDATER: 
+                // Wrapping the update command in a hidden CMD instance to stop startup flashes.
                 var psi = new System.Diagnostics.ProcessStartInfo
                 {
-                    FileName = ytdlpPath,
-                    Arguments = "-U",
+                    FileName = "cmd.exe",
+                    Arguments = $"/c \"\"{ytdlpPath}\" -U\"",
                     CreateNoWindow = true,
                     WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden,
                     UseShellExecute = false,
@@ -343,9 +345,6 @@ namespace YTDLPHost.ViewModels
                     return;
                 }
 
-                // THE ANTI-DUPLICATE SHIELD
-                // Checks if the exact same command is already running/queued. 
-                // Different resolutions/formats create different commands, so they will safely bypass this block!
                 bool isDuplicate = false;
                 System.Windows.Application.Current?.Dispatcher.Invoke(() =>
                 {
