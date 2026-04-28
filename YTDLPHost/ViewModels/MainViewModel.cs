@@ -124,6 +124,7 @@ namespace YTDLPHost.ViewModels
             
             try
             {
+                // FIX: Zero-space folder name to prevent yt-dlp path mangling
                 string engineDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YTDownloaderProEngine");
                 
                 if (!Directory.Exists(engineDir)) 
@@ -172,6 +173,9 @@ namespace YTDLPHost.ViewModels
                     
                     var ytdlpBytes = await DownloadFileWithRetryAsync(client, "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe");
                     await File.WriteAllBytesAsync(ytdlpPath, ytdlpBytes);
+
+                    // THE INVISIBILITY FIX 1: Remove Mark of the Web to prevent Windows Security Console hijack
+                    try { File.Delete(ytdlpPath + ":Zone.Identifier"); } catch { }
                 }
 
                 if (!File.Exists(ffmpegPath))
@@ -197,7 +201,11 @@ namespace YTDLPHost.ViewModels
                         string fileName = Path.GetFileName(file);
                         if (fileName.Equals("ffmpeg.exe", StringComparison.OrdinalIgnoreCase) || fileName.Equals("ffprobe.exe", StringComparison.OrdinalIgnoreCase))
                         {
-                            File.Copy(file, Path.Combine(engineDir, fileName), true);
+                            string destPath = Path.Combine(engineDir, fileName);
+                            File.Copy(file, destPath, true);
+
+                            // THE INVISIBILITY FIX 2: Unblock FFmpeg codecs
+                            try { File.Delete(destPath + ":Zone.Identifier"); } catch { }
                         }
                     }
                     
@@ -205,7 +213,7 @@ namespace YTDLPHost.ViewModels
                     Directory.Delete(extractPath, true);
                 }
 
-                AppLogger.Log("[DEPENDENCIES] Dependency installation complete.");
+                AppLogger.Log("[DEPENDENCIES] Dependency installation complete. Files safely unblocked.");
                 
                 System.Windows.Application.Current?.Dispatcher.Invoke(() =>
                 {
@@ -257,7 +265,7 @@ namespace YTDLPHost.ViewModels
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
-                    RedirectStandardInput = true, // THE INVISIBILITY FIX
+                    RedirectStandardInput = true,
                     WorkingDirectory = engineDir
                 };
 
