@@ -18,6 +18,10 @@ using YTDLPHost.Services;
 
 namespace YTDLPHost.ViewModels
 {
+    /// <summary>
+    /// The primary view model responsible for managing the download queue, coordinating UI updates, 
+    /// handling IPC URL payloads, and maintaining core engine dependencies.
+    /// </summary>
     public partial class MainViewModel : ObservableObject, IDisposable
     {
         private static readonly Regex CommandPathRegex = new(@"-(?:o|P)\s+""([^""]+)""", RegexOptions.Compiled);
@@ -29,6 +33,7 @@ namespace YTDLPHost.ViewModels
         private readonly ObservableCollection<DownloadItemViewModel> _downloads = new();
         private readonly Dictionary<Guid, YtDlpRunner> _activeRunners = new();
         
+        // Limits concurrent downloads to preserve user bandwidth and CPU resources.
         private const int MaxConcurrentDownloads = 3; 
 
         private bool _isProcessingQueue;
@@ -46,6 +51,7 @@ namespace YTDLPHost.ViewModels
 
         public ObservableCollection<DownloadItemViewModel> Downloads => _downloads;
 
+        // Relay Commands for UI Binding
         public IRelayCommand<string> ProcessUrlCommand { get; }
         public IRelayCommand<DownloadItemViewModel> PauseDownloadCommand { get; }
         public IRelayCommand<DownloadItemViewModel> CancelDownloadCommand { get; }
@@ -98,9 +104,13 @@ namespace YTDLPHost.ViewModels
                 UpdateActiveCount();
             };
 
+            // Initiate the background check for essential CLI binaries.
             _ = CheckAndDownloadDependenciesAsync();
         }
 
+        /// <summary>
+        /// A resilient network fetcher designed to absorb micro-disconnects during payload acquisition.
+        /// </summary>
         private async Task<byte[]> DownloadFileWithRetryAsync(HttpClient client, string url, int maxRetries = 3)
         {
             for (int i = 0; i < maxRetries; i++)
@@ -118,13 +128,17 @@ namespace YTDLPHost.ViewModels
             return await client.GetByteArrayAsync(url); 
         }
 
+        /// <summary>
+        /// Verifies the presence of the yt-dlp and ffmpeg engines in the LocalAppData store.
+        /// If absent, fetches them dynamically and strips 'Mark of the Web' (MotW) to allow silent execution.
+        /// </summary>
         private async Task CheckAndDownloadDependenciesAsync()
         {
             DownloadItemViewModel? setupVm = null;
             
             try
             {
-                // FIX: Zero-space folder name to prevent yt-dlp path mangling
+                // Core Pathing: Spaceless folder guarantees that Python argument parsers will not mangle the absolute paths.
                 string engineDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YTDownloaderProEngine");
                 
                 if (!Directory.Exists(engineDir)) 
@@ -166,6 +180,7 @@ namespace YTDLPHost.ViewModels
                 client.Timeout = TimeSpan.FromMinutes(15); 
                 client.DefaultRequestHeaders.Add("User-Agent", "YTDownloaderPro/6.0 (Windows NT 10.0; Win64; x64)");
                 
+                // --- FETCH YT-DLP ---
                 if (!File.Exists(ytdlpPath))
                 {
                     AppLogger.Log("[DEPENDENCIES] Downloading yt-dlp binary.");
@@ -174,10 +189,12 @@ namespace YTDLPHost.ViewModels
                     var ytdlpBytes = await DownloadFileWithRetryAsync(client, "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe");
                     await File.WriteAllBytesAsync(ytdlpPath, ytdlpBytes);
 
-                    // THE INVISIBILITY FIX 1: Remove Mark of the Web to prevent Windows Security Console hijack
+                    // ARCHITECTURE FIX: Delete the Zone.Identifier (MotW) stream. 
+                    // This tricks Windows SmartScreen into treating the file as native, preventing unexpected security console pop-ups.
                     try { File.Delete(ytdlpPath + ":Zone.Identifier"); } catch { }
                 }
 
+                // --- FETCH FFMPEG ---
                 if (!File.Exists(ffmpegPath))
                 {
                     AppLogger.Log("[DEPENDENCIES] Downloading FFmpeg build archive.");
@@ -204,7 +221,7 @@ namespace YTDLPHost.ViewModels
                             string destPath = Path.Combine(engineDir, fileName);
                             File.Copy(file, destPath, true);
 
-                            // THE INVISIBILITY FIX 2: Unblock FFmpeg codecs
+                            // ARCHITECTURE FIX: Unblock FFmpeg codecs to prevent security pop-ups.
                             try { File.Delete(destPath + ":Zone.Identifier"); } catch { }
                         }
                     }
@@ -252,6 +269,9 @@ namespace YTDLPHost.ViewModels
             }
         }
 
+        /// <summary>
+        /// Executes a silent background call to update yt-dlp to the latest GitHub release.
+        /// </summary>
         private void UpdateYtDlp(string ytdlpPath, string engineDir)
         {
             try
@@ -265,9 +285,13 @@ namespace YTDLPHost.ViewModels
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
-                    RedirectStandardInput = true,
+                    RedirectStandardInput = true, // Forces process detachment from the console subsystem
                     WorkingDirectory = engineDir
                 };
+
+                // ARCHITECTURE FIX: Blinds Windows Terminal so it cannot intercept and render the background process.
+                psi.Environment.Remove("WT_SESSION");
+                psi.Environment.Remove("WT_PROFILE_ID");
 
                 using var proc = System.Diagnostics.Process.Start(psi);
                 if (proc != null)
@@ -299,6 +323,9 @@ namespace YTDLPHost.ViewModels
             }
         }
 
+        /// <summary>
+        /// A basic security layer to prevent malicious websites from executing destructive shell commands via the custom protocol handler.
+        /// </summary>
         private bool IsCommandSafe(string command)
         {
             string[] forbiddenFlags = { "--exec", "--exec-before-download", "--postprocessor-args", "--setup-hook" };
@@ -319,6 +346,9 @@ namespace YTDLPHost.ViewModels
             return true;
         }
 
+        /// <summary>
+        /// Parses the incoming protocol payload (ytdlp://), applies the anti-duplicate shield, and queues the command.
+        /// </summary>
         public void ProcessUrl(string? url)
         {
             AppLogger.Log($"https://www.amazon.com/CPU-Processors-Memory-Computer-Add-Ons/b?ie=UTF8&node=229189 Validating incoming URL payload. Length: {url?.Length ?? 0}");
@@ -353,6 +383,8 @@ namespace YTDLPHost.ViewModels
                     return;
                 }
 
+                // THE ANTI-DUPLICATE SHIELD
+                // Ensures identical execution strings are not spammed. Varying quality options are permitted.
                 bool isDuplicate = false;
                 System.Windows.Application.Current?.Dispatcher.Invoke(() =>
                 {
@@ -377,6 +409,7 @@ namespace YTDLPHost.ViewModels
                         cookieContent = DecodeBase64(parts[1]);
                         if (!string.IsNullOrWhiteSpace(cookieContent))
                         {
+                            // Safely strip the invisible Unicode BOM marker to prevent yt-dlp Netscape errors
                             cookieContent = cookieContent.TrimStart('\uFEFF');
 
                             var cookieFile = Path.Combine(Path.GetTempPath(), $"ytdlp_cookies_{Guid.NewGuid()}.txt");
@@ -422,6 +455,9 @@ namespace YTDLPHost.ViewModels
             }
         }
 
+        /// <summary>
+        /// Asynchronously cycles through the queue and executes tasks up to the concurrent threshold.
+        /// </summary>
         private async Task ProcessQueueAsync()
         {
             if (_isProcessingQueue) return;
