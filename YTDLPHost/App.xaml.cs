@@ -66,14 +66,24 @@ namespace YTDLPHost
                 AppLogger.Log("[BOOT] Secondary instance detected. Routing payload...");
                 var url = urlArg ?? "ytdlp://show";
                 
-                // BULLETPROOF FALLBACK: Write the massive URL to a file before exiting
-                string payloadFile = Path.Combine(payloadsDir, Guid.NewGuid().ToString() + ".url");
-                File.WriteAllText(payloadFile, url);
-                AppLogger.Log("[BOOT] Payload saved to disk queue.");
+                if (url != "ytdlp://show")
+                {
+                    // Securely write the payload to the disk queue
+                    string payloadFile = Path.Combine(payloadsDir, Guid.NewGuid().ToString() + ".url");
+                    File.WriteAllText(payloadFile, url);
+                    AppLogger.Log("[BOOT] Payload saved to disk queue.");
+                }
                 
                 Task.Run(async () => 
                 {
-                    try { await SingleInstanceManager.SendUrlToRunningInstanceAsync(url); await Task.Delay(500); } catch { }
+                    try 
+                    { 
+                        // THE FIX: Only send the "wake up" command through the pipe. 
+                        // Do NOT send the URL, preventing the double-download race condition!
+                        await SingleInstanceManager.SendUrlToRunningInstanceAsync("ytdlp://show"); 
+                        await Task.Delay(500); 
+                    } 
+                    catch { }
                     finally { Environment.Exit(0); }
                 });
                 return;
@@ -90,7 +100,7 @@ namespace YTDLPHost
             _mainWindow.Show();
             _mainWindow.Activate();
 
-            // Setup the File IPC Watcher to catch payloads that bypass the Named Pipe
+            // Setup the File IPC Watcher to catch payloads
             _payloadWatcher = new FileSystemWatcher(payloadsDir, "*.url") { EnableRaisingEvents = true };
             _payloadWatcher.Created += (s, args) => ProcessPayloadFile(args.FullPath);
 
@@ -126,10 +136,12 @@ namespace YTDLPHost
 
         private void OnUrlReceived(object? sender, string url)
         {
-            AppLogger.Log($"[NAMED PIPE] Primary instance received argument.");
+            // The Named Pipe now only acts as an alarm clock to wake the UI
+            AppLogger.Log($"[NAMED PIPE] Primary instance woke up via pipe.");
             if (_mainViewModel == null) return;
             Dispatcher.BeginInvoke(() =>
             {
+                // Fallback just in case old payload styles sneak through
                 if (url != "ytdlp://show" && url.StartsWith("ytdlp://")) _mainViewModel.ProcessUrl(url);
                 ShowMainWindow();
             });
