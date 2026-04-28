@@ -72,7 +72,6 @@ namespace YTDLPHost
                     AppLogger.Log("[BOOT] Payload saved to disk queue.");
                 }
                 
-                // WARNING FIX: Explicit discard '_ =' tells compiler we intentionally aren't waiting
                 _ = Task.Run(async () => 
                 {
                     try 
@@ -89,6 +88,7 @@ namespace YTDLPHost
             AppLogger.Log("[BOOT] Primary instance established. Initializing UI components.");
             _singleInstanceManager.UrlReceived += OnUrlReceived;
             _mainViewModel = new MainViewModel();
+            
             _mainViewModel.RequestShowWindow += OnRequestShowWindow;
 
             _mainWindow = new MainWindow { DataContext = _mainViewModel };
@@ -110,7 +110,6 @@ namespace YTDLPHost
 
         private void ProcessPayloadFile(string filePath)
         {
-            // WARNING FIX: Explicit discard '_ ='
             _ = Task.Run(async () => 
             {
                 try 
@@ -120,7 +119,9 @@ namespace YTDLPHost
                     File.Delete(filePath);
                     
                     AppLogger.Log($"[FILE IPC] Primary instance successfully extracted payload from disk.");
-                    Dispatcher.BeginInvoke(() =>
+                    
+                    // WARNING FIX: Discard unawaited Dispatcher operation
+                    _ = Dispatcher.BeginInvoke(() =>
                     {
                         if (url != "ytdlp://show" && url.StartsWith("ytdlp://")) _mainViewModel?.ProcessUrl(url);
                         ShowMainWindow();
@@ -133,13 +134,19 @@ namespace YTDLPHost
         private void OnUrlReceived(object? sender, string url)
         {
             AppLogger.Log($"[NAMED PIPE] Primary instance woke up via pipe.");
-            Dispatcher.BeginInvoke(() =>
+            
+            // WARNING FIX: Discard unawaited Dispatcher operation
+            _ = Dispatcher.BeginInvoke(() =>
             {
                 ShowMainWindow();
             });
         }
 
-        private void OnRequestShowWindow(object? sender, EventArgs e) => Dispatcher.BeginInvoke(ShowMainWindow);
+        // WARNING FIX: Discard unawaited Dispatcher operation
+        private void OnRequestShowWindow(object? sender, EventArgs e) 
+        {
+            _ = Dispatcher.BeginInvoke(ShowMainWindow);
+        }
 
         private void ShowMainWindow()
         {
@@ -155,9 +162,7 @@ namespace YTDLPHost
         {
             e.Cancel = true;
             _mainWindow?.Hide();
-            
-            // WARNING FIX: Safely check for null before accessing properties
-            if (_mainViewModel != null) 
+            if (_mainViewModel != null)
             {
                 _mainViewModel.IsWindowVisible = false;
             }
