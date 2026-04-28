@@ -33,7 +33,6 @@ namespace YTDLPHost.ViewModels
         private readonly ObservableCollection<DownloadItemViewModel> _downloads = new();
         private readonly Dictionary<Guid, YtDlpRunner> _activeRunners = new();
         
-        // Limits concurrent downloads to preserve user bandwidth and CPU resources.
         private const int MaxConcurrentDownloads = 3; 
 
         private bool _isProcessingQueue;
@@ -51,7 +50,6 @@ namespace YTDLPHost.ViewModels
 
         public ObservableCollection<DownloadItemViewModel> Downloads => _downloads;
 
-        // Relay Commands for UI Binding
         public IRelayCommand<string> ProcessUrlCommand { get; }
         public IRelayCommand<DownloadItemViewModel> PauseDownloadCommand { get; }
         public IRelayCommand<DownloadItemViewModel> CancelDownloadCommand { get; }
@@ -88,14 +86,14 @@ namespace YTDLPHost.ViewModels
             ShowWindowCommand = new RelayCommand(() => RequestShowWindow?.Invoke(this, EventArgs.Empty));
             ExitCommand = new RelayCommand(ExitApplication);
             
-            // WARNING FIX: Safely extract MainWindow to prevent null-reference warnings on startup
+            // WARNING FIX: Explicit strong reference to prevent null-dereference warnings across threads
             MinimizeToTrayCommand = new RelayCommand(() => 
             {
                 IsWindowVisible = false;
-                var mainWindow = System.Windows.Application.Current?.MainWindow;
-                if (mainWindow != null)
+                var app = System.Windows.Application.Current;
+                if (app != null && app.MainWindow != null)
                 {
-                    mainWindow.WindowState = WindowState.Minimized;
+                    app.MainWindow.WindowState = WindowState.Minimized;
                 }
             });
 
@@ -106,13 +104,9 @@ namespace YTDLPHost.ViewModels
                 UpdateActiveCount();
             };
 
-            // Initiate the background check for essential CLI binaries.
             _ = CheckAndDownloadDependenciesAsync();
         }
 
-        /// <summary>
-        /// A resilient network fetcher designed to absorb micro-disconnects during payload acquisition.
-        /// </summary>
         private async Task<byte[]> DownloadFileWithRetryAsync(HttpClient client, string url, int maxRetries = 3)
         {
             for (int i = 0; i < maxRetries; i++)
@@ -130,17 +124,12 @@ namespace YTDLPHost.ViewModels
             return await client.GetByteArrayAsync(url); 
         }
 
-        /// <summary>
-        /// Verifies the presence of the yt-dlp and ffmpeg engines in the LocalAppData store.
-        /// If absent, fetches them dynamically and strips 'Mark of the Web' (MotW) to allow silent execution.
-        /// </summary>
         private async Task CheckAndDownloadDependenciesAsync()
         {
             DownloadItemViewModel? setupVm = null;
             
             try
             {
-                // ENGINE ISOLATION: Zero-space folder name prevents Python path-mangling bugs
                 string engineDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YTDownloaderProEngine");
                 
                 if (!Directory.Exists(engineDir)) 
@@ -182,7 +171,6 @@ namespace YTDLPHost.ViewModels
                 client.Timeout = TimeSpan.FromMinutes(15); 
                 client.DefaultRequestHeaders.Add("User-Agent", "YTDownloaderPro/6.0 (Windows NT 10.0; Win64; x64)");
                 
-                // --- FETCH YT-DLP ---
                 if (!File.Exists(ytdlpPath))
                 {
                     AppLogger.Log("[DEPENDENCIES] Downloading yt-dlp binary.");
@@ -194,11 +182,9 @@ namespace YTDLPHost.ViewModels
                     var ytdlpBytes = await DownloadFileWithRetryAsync(client, "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe");
                     await File.WriteAllBytesAsync(ytdlpPath, ytdlpBytes);
 
-                    // THE INVISIBILITY FIX 1: Remove Mark of the Web to prevent Windows Security Console hijack
                     try { File.Delete(ytdlpPath + ":Zone.Identifier"); } catch { }
                 }
 
-                // --- FETCH FFMPEG ---
                 if (!File.Exists(ffmpegPath))
                 {
                     AppLogger.Log("[DEPENDENCIES] Downloading FFmpeg build archive.");
@@ -231,7 +217,6 @@ namespace YTDLPHost.ViewModels
                             string destPath = Path.Combine(engineDir, fileName);
                             File.Copy(file, destPath, true);
 
-                            // THE INVISIBILITY FIX 2: Unblock FFmpeg codecs
                             try { File.Delete(destPath + ":Zone.Identifier"); } catch { }
                         }
                     }
@@ -285,9 +270,6 @@ namespace YTDLPHost.ViewModels
             }
         }
 
-        /// <summary>
-        /// Executes a silent background call to update yt-dlp to the latest GitHub release.
-        /// </summary>
         private void UpdateYtDlp(string ytdlpPath, string engineDir)
         {
             try
@@ -301,11 +283,10 @@ namespace YTDLPHost.ViewModels
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
-                    RedirectStandardInput = true, // Forces process detachment from the console subsystem
+                    RedirectStandardInput = true,
                     WorkingDirectory = engineDir
                 };
 
-                // ARCHITECTURE FIX: Blinds Windows Terminal so it cannot intercept and render the background process.
                 psi.Environment.Remove("WT_SESSION");
                 psi.Environment.Remove("WT_PROFILE_ID");
 
@@ -339,9 +320,6 @@ namespace YTDLPHost.ViewModels
             }
         }
 
-        /// <summary>
-        /// A basic security layer to prevent malicious websites from executing destructive shell commands via the custom protocol handler.
-        /// </summary>
         private bool IsCommandSafe(string command)
         {
             string[] forbiddenFlags = { "--exec", "--exec-before-download", "--postprocessor-args", "--setup-hook" };
@@ -362,9 +340,6 @@ namespace YTDLPHost.ViewModels
             return true;
         }
 
-        /// <summary>
-        /// Parses the incoming protocol payload (ytdlp://), applies the anti-duplicate shield, and queues the command.
-        /// </summary>
         public void ProcessUrl(string? url)
         {
             AppLogger.Log($"https://www.amazon.com/CPU-Processors-Memory-Computer-Add-Ons/b?ie=UTF8&node=229189 Validating incoming URL payload. Length: {url?.Length ?? 0}");
@@ -399,8 +374,6 @@ namespace YTDLPHost.ViewModels
                     return;
                 }
 
-                // THE ANTI-DUPLICATE SHIELD
-                // Ensures identical execution strings are not spammed. Varying quality options are permitted.
                 bool isDuplicate = false;
                 System.Windows.Application.Current?.Dispatcher.Invoke(() =>
                 {
@@ -425,7 +398,6 @@ namespace YTDLPHost.ViewModels
                         cookieContent = DecodeBase64(parts[1]);
                         if (!string.IsNullOrWhiteSpace(cookieContent))
                         {
-                            // Safely strip the invisible Unicode BOM marker to prevent yt-dlp Netscape errors
                             cookieContent = cookieContent.TrimStart('\uFEFF');
 
                             var cookieFile = Path.Combine(Path.GetTempPath(), $"ytdlp_cookies_{Guid.NewGuid()}.txt");
@@ -471,9 +443,6 @@ namespace YTDLPHost.ViewModels
             }
         }
 
-        /// <summary>
-        /// Asynchronously cycles through the queue and executes tasks up to the concurrent threshold.
-        /// </summary>
         private async Task ProcessQueueAsync()
         {
             if (_isProcessingQueue) return;
@@ -492,18 +461,30 @@ namespace YTDLPHost.ViewModels
                 {
                     if (_activeRunners.Count >= MaxConcurrentDownloads) break;
 
-                    DownloadItemViewModel? next = null;
-                    System.Windows.Application.Current?.Dispatcher.Invoke(() => next = _downloads.FirstOrDefault(d => d.Task.Status == DownloadStatus.Queued));
+                    DownloadItemViewModel? nextItem = null;
+                    System.Windows.Application.Current?.Dispatcher.Invoke(() => 
+                    {
+                        nextItem = _downloads.FirstOrDefault(d => d.Task.Status == DownloadStatus.Queued);
+                    });
 
-                    if (next == null) break;
+                    if (nextItem == null) break;
 
-                    next.Task.Status = DownloadStatus.Downloading;
-                    System.Windows.Application.Current?.Dispatcher.Invoke(() => { next.Refresh(); SelectedItem = next; StatusText = $"Downloading: {next.DisplayTitle}"; });
-                    RequestScrollToItem?.Invoke(this, next);
+                    // WARNING FIX: Take a strong local reference to avoid closure nullability warnings
+                    var currentTask = nextItem;
+
+                    currentTask.Task.Status = DownloadStatus.Downloading;
+                    System.Windows.Application.Current?.Dispatcher.Invoke(() => 
+                    { 
+                        currentTask.Refresh(); 
+                        SelectedItem = currentTask; 
+                        StatusText = $"Downloading: {currentTask.DisplayTitle}"; 
+                    });
+                    
+                    RequestScrollToItem?.Invoke(this, currentTask);
                     UpdateActiveCount();
 
-                    AppLogger.Log($"[QUEUE] Spawning execution runner for task ID: {next.Id}");
-                    _ = StartDownloadTaskAsync(next);
+                    AppLogger.Log($"[QUEUE] Spawning execution runner for task ID: {currentTask.Id}");
+                    _ = StartDownloadTaskAsync(currentTask);
 
                     await Task.Delay(1500); 
                 }
@@ -541,7 +522,10 @@ namespace YTDLPHost.ViewModels
         private void OnRunnerProgress(object? sender, ProgressEventArgs e)
         {
             var vm = _downloads.FirstOrDefault(d => d.Id == e.TaskId);
-            if (vm != null) System.Windows.Application.Current?.Dispatcher.BeginInvoke(DispatcherPriority.Background, () => { vm.Refresh(); UpdateActiveCount(); });
+            if (vm != null) 
+            {
+                _ = System.Windows.Application.Current?.Dispatcher.BeginInvoke(DispatcherPriority.Background, () => { vm.Refresh(); UpdateActiveCount(); });
+            }
         }
 
         private void OnRunnerComplete(object? sender, CompleteEventArgs e)
@@ -549,14 +533,13 @@ namespace YTDLPHost.ViewModels
             var vm = _downloads.FirstOrDefault(d => d.Id == e.TaskId);
             if (vm != null)
             {
-                System.Windows.Application.Current?.Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+                _ = System.Windows.Application.Current?.Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
                 {
                     vm.Refresh();
                     HasCompletedDownloads = true;
                     UpdateActiveCount();
                     _trayService.ShowDownloadCompleteNotification("Download Complete", e.Title);
                     
-                    // WARNING FIX: Added discard to silence unawaited Task warning
                     _ = Task.Run(() => CleanupPartialFiles(vm.Task));
                 });
             }
@@ -565,13 +548,19 @@ namespace YTDLPHost.ViewModels
         private void OnRunnerError(object? sender, DownloadErrorEventArgs e)
         {
             var vm = _downloads.FirstOrDefault(d => d.Id == e.TaskId);
-            if (vm != null) System.Windows.Application.Current?.Dispatcher.BeginInvoke(DispatcherPriority.Background, () => { vm.Refresh(); UpdateActiveCount(); });
+            if (vm != null) 
+            {
+                _ = System.Windows.Application.Current?.Dispatcher.BeginInvoke(DispatcherPriority.Background, () => { vm.Refresh(); UpdateActiveCount(); });
+            }
         }
 
         private void OnRunnerInfo(object? sender, ExtractedInfoEventArgs e)
         {
             var vm = _downloads.FirstOrDefault(d => d.Id == e.TaskId);
-            if (vm != null) System.Windows.Application.Current?.Dispatcher.BeginInvoke(DispatcherPriority.Background, () => vm.Refresh());
+            if (vm != null) 
+            {
+                _ = System.Windows.Application.Current?.Dispatcher.BeginInvoke(DispatcherPriority.Background, () => vm.Refresh());
+            }
         }
 
         private void PauseDownload(DownloadItemViewModel? vm)
@@ -593,7 +582,6 @@ namespace YTDLPHost.ViewModels
             vm.Refresh();
             UpdateActiveCount();
             
-            // WARNING FIX: Added discard to silence unawaited Task warning
             _ = Task.Run(() => CleanupPartialFiles(vm.Task, forceDeleteAll: true));
             CleanupCookieFile(vm.Task);
         }
@@ -611,8 +599,6 @@ namespace YTDLPHost.ViewModels
                 try
                 {
                     string dir = Path.GetDirectoryName(task.OutputPath) ?? "";
-                    
-                    // WARNING FIX: Ensure null-safety when extracting the filename
                     string title = Path.GetFileNameWithoutExtension(task.OutputPath) ?? "";
 
                     if (Directory.Exists(dir) && !string.IsNullOrEmpty(title))
@@ -680,7 +666,7 @@ namespace YTDLPHost.ViewModels
 
         private void UpdateActiveCount()
         {
-            System.Windows.Application.Current?.Dispatcher.BeginInvoke(() =>
+            _ = System.Windows.Application.Current?.Dispatcher.BeginInvoke(() =>
             {
                 ActiveDownloadCount = _downloads.Count(d => d.Task.Status == DownloadStatus.Queued || d.Task.Status == DownloadStatus.Downloading);
                 _trayService.UpdateTooltip(ActiveDownloadCount == 0 ? "YT Downloader Pro - Idle" : $"YT Downloader Pro - {ActiveDownloadCount} active");
@@ -707,9 +693,8 @@ namespace YTDLPHost.ViewModels
         private static string ExtractTitleHint(string command)
         {
             var match = OutputTemplateRegex.Match(command);
-            if (match.Success) 
+            if (match.Success)
             {
-                // WARNING FIX: Explicit null check before calling Replace to prevent null-reference warnings
                 string fileName = Path.GetFileNameWithoutExtension(match.Groups[1].Value) ?? "Fetching Title...";
                 return fileName.Replace("%(title)s", "Fetching Title...").Replace("%(uploader)s", "Channel");
             }
