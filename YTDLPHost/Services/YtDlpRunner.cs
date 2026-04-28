@@ -60,11 +60,12 @@ namespace YTDLPHost.Services
 
                 string engineDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YT Downloader Pro", "Engine");
                 string ytdlpPath = Path.Combine(engineDir, "yt-dlp.exe");
+                string ffmpegPath = Path.Combine(engineDir, "ffmpeg.exe");
 
-                // THE FIX: Explicitly inject the FFmpeg location so it can find it regardless of the WorkingDirectory
+                // THE FIX: Point exactly to the ffmpeg.exe file, NOT the directory!
                 if (!command.Contains("--ffmpeg-location"))
                 {
-                    command += $" --ffmpeg-location \"{engineDir}\"";
+                    command += $" --ffmpeg-location \"{ffmpegPath}\"";
                 }
 
                 if (!string.IsNullOrEmpty(task.CookieFilePath) && File.Exists(task.CookieFilePath))
