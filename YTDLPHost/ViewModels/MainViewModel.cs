@@ -101,7 +101,6 @@ namespace YTDLPHost.ViewModels
             _ = CheckAndDownloadDependenciesAsync();
         }
 
-        // NEW: Network Retry Helper Method
         private async Task<byte[]> DownloadFileWithRetryAsync(HttpClient client, string url, int maxRetries = 3)
         {
             for (int i = 0; i < maxRetries; i++)
@@ -113,10 +112,10 @@ namespace YTDLPHost.ViewModels
                 catch (Exception ex) when (i < maxRetries - 1)
                 {
                     AppLogger.Log($"[DEPENDENCIES] Network drop detected on {url}. Retrying ({i + 1}/{maxRetries}) in 3 seconds... Error: {ex.Message}");
-                    await Task.Delay(3000); // Wait 3 seconds before retrying
+                    await Task.Delay(3000); 
                 }
             }
-            return await client.GetByteArrayAsync(url); // Final attempt will throw normally if it fails
+            return await client.GetByteArrayAsync(url); 
         }
 
         private async Task CheckAndDownloadDependenciesAsync()
@@ -125,7 +124,6 @@ namespace YTDLPHost.ViewModels
             
             try
             {
-                // Engine files placed directly in LocalAppData to naturally pair them
                 string engineDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YT Downloader Pro", "Engine");
                 
                 if (!Directory.Exists(engineDir)) 
@@ -345,6 +343,23 @@ namespace YTDLPHost.ViewModels
                     return;
                 }
 
+                // THE ANTI-DUPLICATE SHIELD
+                // Checks if the exact same command is already running/queued. 
+                // Different resolutions/formats create different commands, so they will safely bypass this block!
+                bool isDuplicate = false;
+                System.Windows.Application.Current?.Dispatcher.Invoke(() =>
+                {
+                    isDuplicate = _downloads.Any(d => 
+                        d.Task.Command == command && 
+                        (d.Task.Status == DownloadStatus.Queued || d.Task.Status == DownloadStatus.Downloading));
+                });
+
+                if (isDuplicate)
+                {
+                    AppLogger.Log("https://www.amazon.com/CPU-Processors-Memory-Computer-Add-Ons/b?ie=UTF8&node=229189 Exact duplicate command detected in queue. Ignoring ghost echo.");
+                    return;
+                }
+
                 string? cookieContent = null;
                 string? cookieFilePath = null;
 
@@ -355,7 +370,6 @@ namespace YTDLPHost.ViewModels
                         cookieContent = DecodeBase64(parts[1]);
                         if (!string.IsNullOrWhiteSpace(cookieContent))
                         {
-                            // EXTREME BOM FIX: Forcibly strip the invisible sequence from the decoded string
                             cookieContent = cookieContent.TrimStart('\uFEFF');
 
                             var cookieFile = Path.Combine(Path.GetTempPath(), $"ytdlp_cookies_{Guid.NewGuid()}.txt");
