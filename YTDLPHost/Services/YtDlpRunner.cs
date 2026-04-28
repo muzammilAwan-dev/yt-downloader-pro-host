@@ -10,8 +10,14 @@ using YTDLPHost.Models;
 
 namespace YTDLPHost.Services
 {
+    /// <summary>
+    /// Executes and monitors yt-dlp.exe background processes.
+    /// Features advanced sandboxing to prevent modern Windows Console subsystems (like Windows Terminal) 
+    /// from hijacking and rendering the process visibly.
+    /// </summary>
     public class YtDlpRunner : IDisposable
     {
+        // --- Output Parsing Expressions ---
         private static readonly Regex CmdTrimRegex = new(@"^(?:yt-dlp\.exe|yt-dlp)\s+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex PercentRegex = new(@"\[download\]\s+(?:(\d+\.?\d*)%|100%)", RegexOptions.Compiled);
         private static readonly Regex SpeedRegex = new(@"at\s+([\d\.]+[KMG]iB/s)", RegexOptions.Compiled);
@@ -20,20 +26,19 @@ namespace YTDLPHost.Services
         private static readonly Regex PlaylistRegex = new(@"Downloading item (\d+) of (\d+)", RegexOptions.Compiled);
         private static readonly Regex OutputTemplateRegex = new(@"-o\s+""([^""]+)""", RegexOptions.Compiled);
         private static readonly Regex PathTemplateRegex = new(@"-P\s+""([^""]+)""", RegexOptions.Compiled);
-        
         private static readonly Regex FileTrackerRegex = new(@"(?:Destination:|Writing video \w+ to:|Writing video \w+ \d+ to:)\s+(.+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
         private static readonly Regex AlreadyDownloadedRegex = new(@"\[download\]\s+(.*?)\s+has already been downloaded", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         private Process? _process;
         private readonly CancellationTokenSource _cts = new();
         private readonly StringBuilder _errorBuffer = new();
+        
         private bool _extractionComplete;
         private bool _disposed;
-        
         private bool _hasStartedVideoMedia;
-
         private DateTime _lastUiUpdate = DateTime.MinValue;
 
+        // --- Event Hooks for UI Binding ---
         public event EventHandler<ProgressEventArgs>? OnProgressUpdate;
         public event EventHandler<CompleteEventArgs>? OnDownloadComplete;
         public event EventHandler<DownloadErrorEventArgs>? OnDownloadError;
@@ -41,6 +46,9 @@ namespace YTDLPHost.Services
 
         public bool IsRunning => _process != null && !_process.HasExited;
 
+        /// <summary>
+        /// Initiates the download task in a heavily isolated background process.
+        /// </summary>
         public async Task ExecuteAsync(DownloadTask task)
         {
             _errorBuffer.Clear();
@@ -58,16 +66,20 @@ namespace YTDLPHost.Services
             {
                 var saveDirectory = ExtractSaveDirectory(command);
 
+                // ENGINE ISOLATION: 
+                // We use a strictly spaceless directory (YTDownloaderProEngine) to prevent 
+                // Python's internal argument parser from mangling the FFmpeg path injections.
                 string engineDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YTDownloaderProEngine");
                 string ytdlpPath = Path.Combine(engineDir, "yt-dlp.exe");
                 string ffmpegPath = Path.Combine(engineDir, "ffmpeg.exe");
 
-                // THE FFMPEG FIX: Pass the absolute path to the .exe file now that the folder has no spaces
+                // Point yt-dlp explicitly to the exact ffmpeg binary
                 if (!command.Contains("--ffmpeg-location"))
                 {
                     command += $" --ffmpeg-location \"{ffmpegPath}\"";
                 }
 
+                // Append local session cookies if provided by the Chrome Extension
                 if (!string.IsNullOrEmpty(task.CookieFilePath) && File.Exists(task.CookieFilePath))
                 {
                     command += $" --cookies \"{task.CookieFilePath}\"";
@@ -86,11 +98,17 @@ namespace YTDLPHost.Services
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
-                    RedirectStandardInput = true, // THE INVISIBILITY FIX
+                    // ARCHITECTURE FIX: Redirecting Input forces Windows to detach the process from the console 
+                    // subsystem entirely, ensuring PyInstaller executables remain invisible.
+                    RedirectStandardInput = true, 
                     WorkingDirectory = engineDir,
                     StandardOutputEncoding = Encoding.UTF8,
                     StandardErrorEncoding = Encoding.UTF8
                 };
+
+                // ARCHITECTURE FIX: Blind modern Windows Terminal from intercepting the execution.
+                psi.Environment.Remove("WT_SESSION");
+                psi.Environment.Remove("WT_PROFILE_ID");
 
                 _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
                 _process.OutputDataReceived += (s, e) => HandleOutput(e.Data, task);
@@ -158,6 +176,10 @@ namespace YTDLPHost.Services
             }
         }
 
+        /// <summary>
+        /// Translates the raw CLI output stream from yt-dlp into bindable UI models.
+        /// Extracts file paths, tracks download percentages, and determines the current rendering phase.
+        /// </summary>
         private void HandleOutput(string? data, DownloadTask task)
         {
             if (string.IsNullOrWhiteSpace(data)) return;
@@ -166,6 +188,7 @@ namespace YTDLPHost.Services
             bool needsUiUpdate = false;
             double oldProgress = task.Progress;
 
+            // Handle playlist progression
             if (data.Contains("[download] Downloading item", StringComparison.OrdinalIgnoreCase))
             {
                 var match = PlaylistRegex.Match(data);
@@ -186,6 +209,7 @@ namespace YTDLPHost.Services
                 return; 
             }
 
+            // Track file generation across different media streams (Video vs Audio vs Subs)
             if (data.Contains("Destination:", StringComparison.OrdinalIgnoreCase) || 
                 data.Contains("Writing video", StringComparison.OrdinalIgnoreCase) || 
                 data.Contains("has already been downloaded", StringComparison.OrdinalIgnoreCase))
@@ -219,6 +243,7 @@ namespace YTDLPHost.Services
                         task.FileSize = "";
                         oldProgress = task.Progress;
 
+                        // Phase detection based on file extension
                         if (ext is ".vtt" or ".srt" or ".ass" or ".ttml" or ".lrc" or ".sbv" or ".ssa" or ".sub")
                         {
                             task.CurrentPhase = "Downloading Subtitles...";
@@ -249,6 +274,7 @@ namespace YTDLPHost.Services
                 }
             }
 
+            // Pre-download extraction phase
             if (!_extractionComplete && (data.Contains("[youtube]", StringComparison.OrdinalIgnoreCase) || data.Contains("[info]", StringComparison.OrdinalIgnoreCase)))
             {
                 if (task.CurrentPhase == "Starting...")
@@ -263,6 +289,7 @@ namespace YTDLPHost.Services
                 }
             }
 
+            // Advanced Post-Processing Identifiers
             if (data.Contains("[SponsorBlock]", StringComparison.OrdinalIgnoreCase))
             {
                 task.CurrentPhase = "Removing Sponsors...";
@@ -296,6 +323,7 @@ namespace YTDLPHost.Services
                 }
             }
 
+            // Real-time metrics
             if (data.Contains("[download]", StringComparison.OrdinalIgnoreCase) && data.Contains("%"))
             {
                 task.IsIndeterminate = false; 
@@ -335,6 +363,7 @@ namespace YTDLPHost.Services
                 if (etaMatch.Success) { task.Eta = etaMatch.Groups[1].Value; needsUiUpdate = true; }
             }
 
+            // Throttle UI updates to prevent UI thread lockups
             if (needsUiUpdate)
             {
                 var now = DateTime.Now;
@@ -353,6 +382,9 @@ namespace YTDLPHost.Services
             task.AppendLog($"[stderr] {data}");
         }
 
+        /// <summary>
+        /// Securely resolves the final output directory using environment variable expansion.
+        /// </summary>
         private static string ExtractSaveDirectory(string command)
         {
             var match = OutputTemplateRegex.Match(command);
@@ -380,6 +412,9 @@ namespace YTDLPHost.Services
             return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         }
 
+        /// <summary>
+        /// Commits the full execution log to the user's disk for debugging purposes.
+        /// </summary>
         private void SaveLogsToDisk(DownloadTask task)
         {
             if (string.IsNullOrWhiteSpace(task.OutputPath)) return;
@@ -421,6 +456,7 @@ namespace YTDLPHost.Services
                 _cts.Cancel();
                 if (_process != null && !_process.HasExited)
                 {
+                    // Kill the entire process tree to ensure spawned FFmpeg processes don't linger
                     _process.Kill(entireProcessTree: true);
                     _process.WaitForExit(5000);
                 }
