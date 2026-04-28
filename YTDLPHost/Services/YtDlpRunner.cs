@@ -60,13 +60,6 @@ namespace YTDLPHost.Services
 
                 string engineDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YT Downloader Pro", "Engine");
                 string ytdlpPath = Path.Combine(engineDir, "yt-dlp.exe");
-                string ffmpegPath = Path.Combine(engineDir, "ffmpeg.exe");
-
-                // THE FIX: Point exactly to the ffmpeg.exe file, NOT the directory!
-                if (!command.Contains("--ffmpeg-location"))
-                {
-                    command += $" --ffmpeg-location \"{ffmpegPath}\"";
-                }
 
                 if (!string.IsNullOrEmpty(task.CookieFilePath) && File.Exists(task.CookieFilePath))
                 {
@@ -90,6 +83,14 @@ namespace YTDLPHost.Services
                     StandardOutputEncoding = Encoding.UTF8,
                     StandardErrorEncoding = Encoding.UTF8
                 };
+
+                // THE ULTIMATE FIX: Dynamically inject the Engine folder into the system PATH
+                // This forces yt-dlp to natively discover ffmpeg/ffprobe without relying on buggy command-line arguments
+                string currentPath = psi.Environment["PATH"] ?? Environment.GetEnvironmentVariable("PATH") ?? "";
+                if (!currentPath.Contains(engineDir, StringComparison.OrdinalIgnoreCase))
+                {
+                    psi.Environment["PATH"] = engineDir + ";" + currentPath;
+                }
 
                 _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
                 _process.OutputDataReceived += (s, e) => HandleOutput(e.Data, task);
