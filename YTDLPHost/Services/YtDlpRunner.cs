@@ -56,15 +56,11 @@ namespace YTDLPHost.Services
 
             try
             {
-                string engineDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YT Downloader Pro", "Engine");
-                string ytdlpPath = Path.Combine(engineDir, "yt-dlp.exe");
+                var saveDirectory = ExtractSaveDirectory(command);
 
-                // THE FFMPEG BUG FIX: 
-                // Using "." completely avoids path spaces and quoting bugs. It forces yt-dlp to look in the WorkingDirectory!
-                if (!command.Contains("--ffmpeg-location"))
-                {
-                    command += " --ffmpeg-location .";
-                }
+                // REVERTED: Engine is back in the exact same directory as the Host Application
+                string engineDir = AppDomain.CurrentDomain.BaseDirectory;
+                string ytdlpPath = Path.Combine(engineDir, "yt-dlp.exe");
 
                 if (!string.IsNullOrEmpty(task.CookieFilePath) && File.Exists(task.CookieFilePath))
                 {
@@ -84,22 +80,10 @@ namespace YTDLPHost.Services
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
-                    WorkingDirectory = engineDir, // CRITICAL: Run directly inside the Engine folder
+                    WorkingDirectory = saveDirectory,
                     StandardOutputEncoding = Encoding.UTF8,
                     StandardErrorEncoding = Encoding.UTF8
                 };
-
-                // THE TERMINAL HIJACK FIX:
-                // Wiping these variables blinds Windows Terminal so it cannot force the window to show up.
-                psi.Environment.Remove("WT_SESSION");
-                psi.Environment.Remove("WT_PROFILE_ID");
-                
-                // Backup path injection
-                string currentPath = psi.Environment["PATH"] ?? Environment.GetEnvironmentVariable("PATH") ?? "";
-                if (!currentPath.Contains(engineDir, StringComparison.OrdinalIgnoreCase))
-                {
-                    psi.Environment["PATH"] = engineDir + ";" + currentPath;
-                }
 
                 _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
                 _process.OutputDataReceived += (s, e) => HandleOutput(e.Data, task);
