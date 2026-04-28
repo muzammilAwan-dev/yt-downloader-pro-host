@@ -72,11 +72,11 @@ namespace YTDLPHost
                     AppLogger.Log("[BOOT] Payload saved to disk queue.");
                 }
                 
-                Task.Run(async () => 
+                // WARNING FIX: Explicit discard '_ =' tells compiler we intentionally aren't waiting
+                _ = Task.Run(async () => 
                 {
                     try 
                     { 
-                        // The pipe is now strictly an alarm clock. No URLs are sent.
                         await SingleInstanceManager.SendUrlToRunningInstanceAsync("ytdlp://show"); 
                         await Task.Delay(500); 
                     } 
@@ -110,7 +110,8 @@ namespace YTDLPHost
 
         private void ProcessPayloadFile(string filePath)
         {
-            Task.Run(async () => 
+            // WARNING FIX: Explicit discard '_ ='
+            _ = Task.Run(async () => 
             {
                 try 
                 {
@@ -131,8 +132,6 @@ namespace YTDLPHost
 
         private void OnUrlReceived(object? sender, string url)
         {
-            // THE FIX: The pipe ignores the string entirely and only wakes up the window.
-            // This permanently kills the "Double Download" bug.
             AppLogger.Log($"[NAMED PIPE] Primary instance woke up via pipe.");
             Dispatcher.BeginInvoke(() =>
             {
@@ -156,7 +155,12 @@ namespace YTDLPHost
         {
             e.Cancel = true;
             _mainWindow?.Hide();
-            _mainViewModel!.IsWindowVisible = false;
+            
+            // WARNING FIX: Safely check for null before accessing properties
+            if (_mainViewModel != null) 
+            {
+                _mainViewModel.IsWindowVisible = false;
+            }
         }
 
         protected override void OnExit(ExitEventArgs e)
