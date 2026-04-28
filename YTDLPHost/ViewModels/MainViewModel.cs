@@ -88,12 +88,14 @@ namespace YTDLPHost.ViewModels
             ShowWindowCommand = new RelayCommand(() => RequestShowWindow?.Invoke(this, EventArgs.Empty));
             ExitCommand = new RelayCommand(ExitApplication);
             
+            // WARNING FIX: Safely extract MainWindow to prevent null-reference warnings on startup
             MinimizeToTrayCommand = new RelayCommand(() => 
             {
                 IsWindowVisible = false;
-                if (System.Windows.Application.Current?.MainWindow != null)
+                var mainWindow = System.Windows.Application.Current?.MainWindow;
+                if (mainWindow != null)
                 {
-                    System.Windows.Application.Current.MainWindow.WindowState = WindowState.Minimized;
+                    mainWindow.WindowState = WindowState.Minimized;
                 }
             });
 
@@ -138,7 +140,7 @@ namespace YTDLPHost.ViewModels
             
             try
             {
-                // Core Pathing: Spaceless folder guarantees that Python argument parsers will not mangle the absolute paths.
+                // ENGINE ISOLATION: Zero-space folder name prevents Python path-mangling bugs
                 string engineDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YTDownloaderProEngine");
                 
                 if (!Directory.Exists(engineDir)) 
@@ -184,13 +186,15 @@ namespace YTDLPHost.ViewModels
                 if (!File.Exists(ytdlpPath))
                 {
                     AppLogger.Log("[DEPENDENCIES] Downloading yt-dlp binary.");
-                    System.Windows.Application.Current?.Dispatcher.Invoke(() => { setupVm.Task.CurrentPhase = "Downloading yt-dlp engine..."; setupVm.Refresh(); });
+                    System.Windows.Application.Current?.Dispatcher.Invoke(() => 
+                    { 
+                        if (setupVm != null) { setupVm.Task.CurrentPhase = "Downloading yt-dlp engine..."; setupVm.Refresh(); }
+                    });
                     
                     var ytdlpBytes = await DownloadFileWithRetryAsync(client, "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe");
                     await File.WriteAllBytesAsync(ytdlpPath, ytdlpBytes);
 
-                    // ARCHITECTURE FIX: Delete the Zone.Identifier (MotW) stream. 
-                    // This tricks Windows SmartScreen into treating the file as native, preventing unexpected security console pop-ups.
+                    // THE INVISIBILITY FIX 1: Remove Mark of the Web to prevent Windows Security Console hijack
                     try { File.Delete(ytdlpPath + ":Zone.Identifier"); } catch { }
                 }
 
@@ -198,7 +202,10 @@ namespace YTDLPHost.ViewModels
                 if (!File.Exists(ffmpegPath))
                 {
                     AppLogger.Log("[DEPENDENCIES] Downloading FFmpeg build archive.");
-                    System.Windows.Application.Current?.Dispatcher.Invoke(() => { setupVm.Task.CurrentPhase = "Downloading FFmpeg media codecs (This may take a minute)..."; setupVm.Refresh(); });
+                    System.Windows.Application.Current?.Dispatcher.Invoke(() => 
+                    { 
+                        if (setupVm != null) { setupVm.Task.CurrentPhase = "Downloading FFmpeg media codecs (This may take a minute)..."; setupVm.Refresh(); }
+                    });
 
                     string zipPath = Path.Combine(Path.GetTempPath(), "ffmpeg.zip");
                     string extractPath = Path.Combine(Path.GetTempPath(), "ffmpeg_ext");
@@ -207,7 +214,10 @@ namespace YTDLPHost.ViewModels
                     await File.WriteAllBytesAsync(zipPath, ffmpegBytes);
                     
                     AppLogger.Log("[DEPENDENCIES] Extracting FFmpeg archive contents.");
-                    System.Windows.Application.Current?.Dispatcher.Invoke(() => { setupVm.Task.CurrentPhase = "Extracting codecs..."; setupVm.Refresh(); });
+                    System.Windows.Application.Current?.Dispatcher.Invoke(() => 
+                    { 
+                        if (setupVm != null) { setupVm.Task.CurrentPhase = "Extracting codecs..."; setupVm.Refresh(); }
+                    });
 
                     if (Directory.Exists(extractPath)) Directory.Delete(extractPath, true);
                     ZipFile.ExtractToDirectory(zipPath, extractPath);
@@ -221,7 +231,7 @@ namespace YTDLPHost.ViewModels
                             string destPath = Path.Combine(engineDir, fileName);
                             File.Copy(file, destPath, true);
 
-                            // ARCHITECTURE FIX: Unblock FFmpeg codecs to prevent security pop-ups.
+                            // THE INVISIBILITY FIX 2: Unblock FFmpeg codecs
                             try { File.Delete(destPath + ":Zone.Identifier"); } catch { }
                         }
                     }
@@ -234,16 +244,22 @@ namespace YTDLPHost.ViewModels
                 
                 System.Windows.Application.Current?.Dispatcher.Invoke(() =>
                 {
-                    setupVm.Task.CurrentPhase = "Setup Complete!";
-                    setupVm.Task.Status = DownloadStatus.Completed;
-                    setupVm.Task.Progress = 100.0;
-                    setupVm.Task.IsIndeterminate = false;
-                    setupVm.Refresh();
+                    if (setupVm != null)
+                    {
+                        setupVm.Task.CurrentPhase = "Setup Complete!";
+                        setupVm.Task.Status = DownloadStatus.Completed;
+                        setupVm.Task.Progress = 100.0;
+                        setupVm.Task.IsIndeterminate = false;
+                        setupVm.Refresh();
+                    }
                     StatusText = "Ready";
                 });
 
                 await Task.Delay(2000);
-                System.Windows.Application.Current?.Dispatcher.Invoke(() => _downloads.Remove(setupVm));
+                System.Windows.Application.Current?.Dispatcher.Invoke(() => 
+                {
+                    if (setupVm != null) _downloads.Remove(setupVm);
+                });
 
                 _isDependenciesReady = true;
                 _ = Task.Run(() => UpdateYtDlp(ytdlpPath, engineDir));
@@ -539,7 +555,9 @@ namespace YTDLPHost.ViewModels
                     HasCompletedDownloads = true;
                     UpdateActiveCount();
                     _trayService.ShowDownloadCompleteNotification("Download Complete", e.Title);
-                    Task.Run(() => CleanupPartialFiles(vm.Task));
+                    
+                    // WARNING FIX: Added discard to silence unawaited Task warning
+                    _ = Task.Run(() => CleanupPartialFiles(vm.Task));
                 });
             }
         }
@@ -574,7 +592,9 @@ namespace YTDLPHost.ViewModels
             vm.Task.Status = DownloadStatus.Cancelled;
             vm.Refresh();
             UpdateActiveCount();
-            Task.Run(() => CleanupPartialFiles(vm.Task, forceDeleteAll: true));
+            
+            // WARNING FIX: Added discard to silence unawaited Task warning
+            _ = Task.Run(() => CleanupPartialFiles(vm.Task, forceDeleteAll: true));
             CleanupCookieFile(vm.Task);
         }
 
@@ -591,7 +611,9 @@ namespace YTDLPHost.ViewModels
                 try
                 {
                     string dir = Path.GetDirectoryName(task.OutputPath) ?? "";
-                    string title = Path.GetFileNameWithoutExtension(task.OutputPath);
+                    
+                    // WARNING FIX: Ensure null-safety when extracting the filename
+                    string title = Path.GetFileNameWithoutExtension(task.OutputPath) ?? "";
 
                     if (Directory.Exists(dir) && !string.IsNullOrEmpty(title))
                     {
@@ -685,7 +707,12 @@ namespace YTDLPHost.ViewModels
         private static string ExtractTitleHint(string command)
         {
             var match = OutputTemplateRegex.Match(command);
-            if (match.Success) return Path.GetFileNameWithoutExtension(match.Groups[1].Value).Replace("%(title)s", "Fetching Title...").Replace("%(uploader)s", "Channel");
+            if (match.Success) 
+            {
+                // WARNING FIX: Explicit null check before calling Replace to prevent null-reference warnings
+                string fileName = Path.GetFileNameWithoutExtension(match.Groups[1].Value) ?? "Fetching Title...";
+                return fileName.Replace("%(title)s", "Fetching Title...").Replace("%(uploader)s", "Channel");
+            }
             return "Fetching Title...";
         }
 
