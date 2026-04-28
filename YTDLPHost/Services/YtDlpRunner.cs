@@ -67,15 +67,18 @@ namespace YTDLPHost.Services
                 }
 
                 task.AppendLog("=== Download Task Started ===");
-                task.AppendLog($"Command executed: yt-dlp.exe {command}");
+                task.AppendLog($"Command executed via CMD wrapper: yt-dlp.exe {command}");
                 task.AppendLog("");
 
+                // THE INVISIBILITY CLOAK FIX:
+                // We run cmd.exe silently, which absorbs the console allocation, guaranteeing yt-dlp stays hidden.
+                // The nested quotes `\"\"{ytdlpPath}\" {command}\"` are required by CMD syntax for spaced paths.
                 var psi = new ProcessStartInfo
                 {
-                    FileName = ytdlpPath, 
-                    Arguments = command,
+                    FileName = "cmd.exe",
+                    Arguments = $"/c \"\"{ytdlpPath}\" {command}\"",
                     CreateNoWindow = true,
-                    WindowStyle = ProcessWindowStyle.Hidden, 
+                    WindowStyle = ProcessWindowStyle.Hidden,
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
@@ -84,8 +87,7 @@ namespace YTDLPHost.Services
                     StandardErrorEncoding = Encoding.UTF8
                 };
 
-                // THE ULTIMATE FIX: Dynamically inject the Engine folder into the system PATH
-                // This forces yt-dlp to natively discover ffmpeg/ffprobe without relying on buggy command-line arguments
+                // Retain the PATH injection so FFmpeg is naturally found
                 string currentPath = psi.Environment["PATH"] ?? Environment.GetEnvironmentVariable("PATH") ?? "";
                 if (!currentPath.Contains(engineDir, StringComparison.OrdinalIgnoreCase))
                 {
