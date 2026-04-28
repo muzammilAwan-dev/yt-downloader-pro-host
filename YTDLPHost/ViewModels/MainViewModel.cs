@@ -248,7 +248,8 @@ namespace YTDLPHost.ViewModels
         {
             try
             {
-                // FIX: Run our local yt-dlp directly without CMD
+                string engineDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YT Downloader Pro", "Engine");
+
                 var psi = new System.Diagnostics.ProcessStartInfo
                 {
                     FileName = ytdlpPath,
@@ -257,8 +258,13 @@ namespace YTDLPHost.ViewModels
                     WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden,
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
-                    RedirectStandardError = true
+                    RedirectStandardError = true,
+                    WorkingDirectory = engineDir // Explicitly set
                 };
+
+                // THE TERMINAL HIJACK FIX: Strip WT_SESSION to stop the updater flash
+                psi.Environment.Remove("WT_SESSION");
+                psi.Environment.Remove("WT_PROFILE_ID");
 
                 using var proc = System.Diagnostics.Process.Start(psi);
                 if (proc != null)
