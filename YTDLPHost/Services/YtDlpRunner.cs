@@ -56,10 +56,15 @@ namespace YTDLPHost.Services
 
             try
             {
-                var saveDirectory = ExtractSaveDirectory(command);
-
                 string engineDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YT Downloader Pro", "Engine");
                 string ytdlpPath = Path.Combine(engineDir, "yt-dlp.exe");
+
+                // THE FFMPEG BUG FIX: 
+                // Using "." completely avoids path spaces and quoting bugs. It forces yt-dlp to look in the WorkingDirectory!
+                if (!command.Contains("--ffmpeg-location"))
+                {
+                    command += " --ffmpeg-location .";
+                }
 
                 if (!string.IsNullOrEmpty(task.CookieFilePath) && File.Exists(task.CookieFilePath))
                 {
@@ -72,20 +77,24 @@ namespace YTDLPHost.Services
 
                 var psi = new ProcessStartInfo
                 {
-                    // FIX: Execute our isolated yt-dlp.exe directly, no CMD wrapper
-                    FileName = ytdlpPath, 
+                    FileName = ytdlpPath,
                     Arguments = command,
                     CreateNoWindow = true,
                     WindowStyle = ProcessWindowStyle.Hidden,
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
-                    WorkingDirectory = saveDirectory,
+                    WorkingDirectory = engineDir, // CRITICAL: Run directly inside the Engine folder
                     StandardOutputEncoding = Encoding.UTF8,
                     StandardErrorEncoding = Encoding.UTF8
                 };
 
-                // Keep the PATH injection so FFmpeg is naturally found
+                // THE TERMINAL HIJACK FIX:
+                // Wiping these variables blinds Windows Terminal so it cannot force the window to show up.
+                psi.Environment.Remove("WT_SESSION");
+                psi.Environment.Remove("WT_PROFILE_ID");
+                
+                // Backup path injection
                 string currentPath = psi.Environment["PATH"] ?? Environment.GetEnvironmentVariable("PATH") ?? "";
                 if (!currentPath.Contains(engineDir, StringComparison.OrdinalIgnoreCase))
                 {
