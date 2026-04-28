@@ -58,11 +58,14 @@ namespace YTDLPHost.Services
             {
                 var saveDirectory = ExtractSaveDirectory(command);
 
-                // FIX: Point the runner strictly to the LocalAppData Engine folder where BOTH .exe files sit side-by-side
                 string engineDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YT Downloader Pro", "Engine");
                 string ytdlpPath = Path.Combine(engineDir, "yt-dlp.exe");
 
-                // Note: No --ffmpeg-location injection is needed anymore! yt-dlp will find it naturally.
+                // THE FIX: Explicitly inject the FFmpeg location so it can find it regardless of the WorkingDirectory
+                if (!command.Contains("--ffmpeg-location"))
+                {
+                    command += $" --ffmpeg-location \"{engineDir}\"";
+                }
 
                 if (!string.IsNullOrEmpty(task.CookieFilePath) && File.Exists(task.CookieFilePath))
                 {
@@ -75,10 +78,10 @@ namespace YTDLPHost.Services
 
                 var psi = new ProcessStartInfo
                 {
-                    FileName = ytdlpPath, // Force absolute path
+                    FileName = ytdlpPath, 
                     Arguments = command,
                     CreateNoWindow = true,
-                    WindowStyle = ProcessWindowStyle.Hidden, // Guaranteed 100% invisible terminal
+                    WindowStyle = ProcessWindowStyle.Hidden, 
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
