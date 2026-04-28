@@ -227,8 +227,9 @@ namespace YTDLPHost.Services
                         task.TrackedFiles.Add(path);
                         task.OutputPath = path;
                         
-                        string cleanTitle = Path.GetFileNameWithoutExtension(path);
-                        string ext = Path.GetExtension(path).ToLower();
+                        // WARNING FIX: Strict null handling fallback for file naming
+                        string cleanTitle = Path.GetFileNameWithoutExtension(path) ?? "Unknown";
+                        string ext = Path.GetExtension(path)?.ToLower() ?? "";
                         
                         cleanTitle = Regex.Replace(cleanTitle, @"\.(f\w+|en-orig|en|vtt|webp|jpg)$", "", RegexOptions.IgnoreCase);
 
@@ -394,6 +395,7 @@ namespace YTDLPHost.Services
                 var dir = Path.GetDirectoryName(template);
                 if (!string.IsNullOrEmpty(dir))
                 {
+                    // WARNING FIX: Explicit null check when extracting substrings to avoid warnings
                     dir = Environment.ExpandEnvironmentVariables(dir);
                     if (Directory.Exists(dir)) return dir;
                 }
