@@ -248,12 +248,11 @@ namespace YTDLPHost.ViewModels
         {
             try
             {
-                // THE INVISIBILITY CLOAK APPLIED TO UPDATER: 
-                // Wrapping the update command in a hidden CMD instance to stop startup flashes.
+                // FIX: Run our local yt-dlp directly without CMD
                 var psi = new System.Diagnostics.ProcessStartInfo
                 {
-                    FileName = "cmd.exe",
-                    Arguments = $"/c \"\"{ytdlpPath}\" -U\"",
+                    FileName = ytdlpPath,
+                    Arguments = "-U",
                     CreateNoWindow = true,
                     WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden,
                     UseShellExecute = false,
