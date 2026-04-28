@@ -54,7 +54,6 @@ namespace YTDLPHost
                 ProtocolHandler.Register();
             }
 
-            // FILE IPC SETUP: Create a secure folder for cross-process URL sharing
             string payloadsDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YT Downloader Pro", "Payloads");
             if (!Directory.Exists(payloadsDir)) Directory.CreateDirectory(payloadsDir);
 
@@ -68,7 +67,6 @@ namespace YTDLPHost
                 
                 if (url != "ytdlp://show")
                 {
-                    // Securely write the payload to the disk queue
                     string payloadFile = Path.Combine(payloadsDir, Guid.NewGuid().ToString() + ".url");
                     File.WriteAllText(payloadFile, url);
                     AppLogger.Log("[BOOT] Payload saved to disk queue.");
@@ -78,8 +76,7 @@ namespace YTDLPHost
                 {
                     try 
                     { 
-                        // THE FIX: Only send the "wake up" command through the pipe. 
-                        // Do NOT send the URL, preventing the double-download race condition!
+                        // The pipe is now strictly an alarm clock. No URLs are sent.
                         await SingleInstanceManager.SendUrlToRunningInstanceAsync("ytdlp://show"); 
                         await Task.Delay(500); 
                     } 
@@ -100,11 +97,9 @@ namespace YTDLPHost
             _mainWindow.Show();
             _mainWindow.Activate();
 
-            // Setup the File IPC Watcher to catch payloads
             _payloadWatcher = new FileSystemWatcher(payloadsDir, "*.url") { EnableRaisingEvents = true };
             _payloadWatcher.Created += (s, args) => ProcessPayloadFile(args.FullPath);
 
-            // Process any files that were injected while the app was booting up
             foreach (var file in Directory.GetFiles(payloadsDir, "*.url")) ProcessPayloadFile(file);
 
             if (!string.IsNullOrEmpty(urlArg) && urlArg.StartsWith("ytdlp://"))
@@ -119,7 +114,7 @@ namespace YTDLPHost
             {
                 try 
                 {
-                    await Task.Delay(100); // Give Windows time to release the file lock
+                    await Task.Delay(100); 
                     string url = File.ReadAllText(filePath);
                     File.Delete(filePath);
                     
@@ -136,13 +131,11 @@ namespace YTDLPHost
 
         private void OnUrlReceived(object? sender, string url)
         {
-            // The Named Pipe now only acts as an alarm clock to wake the UI
+            // THE FIX: The pipe ignores the string entirely and only wakes up the window.
+            // This permanently kills the "Double Download" bug.
             AppLogger.Log($"[NAMED PIPE] Primary instance woke up via pipe.");
-            if (_mainViewModel == null) return;
             Dispatcher.BeginInvoke(() =>
             {
-                // Fallback just in case old payload styles sneak through
-                if (url != "ytdlp://show" && url.StartsWith("ytdlp://")) _mainViewModel.ProcessUrl(url);
                 ShowMainWindow();
             });
         }
