@@ -58,13 +58,14 @@ namespace YTDLPHost.Services
             {
                 var saveDirectory = ExtractSaveDirectory(command);
 
-                // FIX: Zero-space directory name to bypass all parsing bugs
                 string engineDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YTDownloaderProEngine");
                 string ytdlpPath = Path.Combine(engineDir, "yt-dlp.exe");
+                string ffmpegPath = Path.Combine(engineDir, "ffmpeg.exe");
 
+                // THE FFMPEG FIX: Pass the absolute path to the .exe file now that the folder has no spaces
                 if (!command.Contains("--ffmpeg-location"))
                 {
-                    command += $" --ffmpeg-location \"{engineDir}\"";
+                    command += $" --ffmpeg-location \"{ffmpegPath}\"";
                 }
 
                 if (!string.IsNullOrEmpty(task.CookieFilePath) && File.Exists(task.CookieFilePath))
@@ -85,8 +86,8 @@ namespace YTDLPHost.Services
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
-                    RedirectStandardInput = true, // THE INVISIBILITY FIX: Forces Windows to detach the console completely
-                    WorkingDirectory = saveDirectory,
+                    RedirectStandardInput = true, // THE INVISIBILITY FIX
+                    WorkingDirectory = engineDir,
                     StandardOutputEncoding = Encoding.UTF8,
                     StandardErrorEncoding = Encoding.UTF8
                 };
