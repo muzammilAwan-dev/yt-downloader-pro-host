@@ -124,8 +124,13 @@ namespace YTDLPHost.ViewModels
             
             try
             {
-                // REVERTED: Engine is back in the exact same directory as the Host Application
-                string engineDir = AppDomain.CurrentDomain.BaseDirectory;
+                string engineDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YTDownloaderProEngine");
+                
+                if (!Directory.Exists(engineDir)) 
+                {
+                    Directory.CreateDirectory(engineDir);
+                }
+
                 string ytdlpPath = Path.Combine(engineDir, "yt-dlp.exe");
                 string ffmpegPath = Path.Combine(engineDir, "ffmpeg.exe");
 
@@ -133,7 +138,7 @@ namespace YTDLPHost.ViewModels
                 {
                     AppLogger.Log("[DEPENDENCIES] Core dependencies located securely.");
                     _isDependenciesReady = true;
-                    _ = Task.Run(() => UpdateYtDlp(ytdlpPath));
+                    _ = Task.Run(() => UpdateYtDlp(ytdlpPath, engineDir));
                     _ = ProcessQueueAsync(); 
                     return;
                 }
@@ -157,7 +162,7 @@ namespace YTDLPHost.ViewModels
                 });
 
                 using var client = new HttpClient();
-                client.Timeout = TimeSpan.FromMinutes(20); 
+                client.Timeout = TimeSpan.FromMinutes(15); 
                 client.DefaultRequestHeaders.Add("User-Agent", "YTDownloaderPro/6.0 (Windows NT 10.0; Win64; x64)");
                 
                 if (!File.Exists(ytdlpPath))
@@ -216,7 +221,7 @@ namespace YTDLPHost.ViewModels
                 System.Windows.Application.Current?.Dispatcher.Invoke(() => _downloads.Remove(setupVm));
 
                 _isDependenciesReady = true;
-                _ = Task.Run(() => UpdateYtDlp(ytdlpPath));
+                _ = Task.Run(() => UpdateYtDlp(ytdlpPath, engineDir));
                 _ = ProcessQueueAsync();
             }
             catch (Exception ex)
@@ -239,7 +244,7 @@ namespace YTDLPHost.ViewModels
             }
         }
 
-        private void UpdateYtDlp(string ytdlpPath)
+        private void UpdateYtDlp(string ytdlpPath, string engineDir)
         {
             try
             {
@@ -251,7 +256,9 @@ namespace YTDLPHost.ViewModels
                     WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden,
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
-                    RedirectStandardError = true
+                    RedirectStandardError = true,
+                    RedirectStandardInput = true, // THE INVISIBILITY FIX
+                    WorkingDirectory = engineDir
                 };
 
                 using var proc = System.Diagnostics.Process.Start(psi);
