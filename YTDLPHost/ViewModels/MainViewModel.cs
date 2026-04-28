@@ -124,19 +124,14 @@ namespace YTDLPHost.ViewModels
             
             try
             {
-                string engineDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YT Downloader Pro", "Engine");
-                
-                if (!Directory.Exists(engineDir)) 
-                {
-                    Directory.CreateDirectory(engineDir);
-                }
-
+                // REVERTED: Engine is back in the exact same directory as the Host Application
+                string engineDir = AppDomain.CurrentDomain.BaseDirectory;
                 string ytdlpPath = Path.Combine(engineDir, "yt-dlp.exe");
                 string ffmpegPath = Path.Combine(engineDir, "ffmpeg.exe");
 
                 if (File.Exists(ytdlpPath) && File.Exists(ffmpegPath))
                 {
-                    AppLogger.Log("[DEPENDENCIES] Core dependencies located securely in LocalAppData.");
+                    AppLogger.Log("[DEPENDENCIES] Core dependencies located securely.");
                     _isDependenciesReady = true;
                     _ = Task.Run(() => UpdateYtDlp(ytdlpPath));
                     _ = ProcessQueueAsync(); 
@@ -162,7 +157,7 @@ namespace YTDLPHost.ViewModels
                 });
 
                 using var client = new HttpClient();
-                client.Timeout = TimeSpan.FromMinutes(20); 
+                client.Timeout = TimeSpan.FromMinutes(15); // Fixed back to 15
                 client.DefaultRequestHeaders.Add("User-Agent", "YTDownloaderPro/6.0 (Windows NT 10.0; Win64; x64)");
                 
                 if (!File.Exists(ytdlpPath))
@@ -248,8 +243,6 @@ namespace YTDLPHost.ViewModels
         {
             try
             {
-                string engineDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YT Downloader Pro", "Engine");
-
                 var psi = new System.Diagnostics.ProcessStartInfo
                 {
                     FileName = ytdlpPath,
@@ -258,13 +251,8 @@ namespace YTDLPHost.ViewModels
                     WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden,
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    WorkingDirectory = engineDir // Explicitly set
+                    RedirectStandardError = true
                 };
-
-                // THE TERMINAL HIJACK FIX: Strip WT_SESSION to stop the updater flash
-                psi.Environment.Remove("WT_SESSION");
-                psi.Environment.Remove("WT_PROFILE_ID");
 
                 using var proc = System.Diagnostics.Process.Start(psi);
                 if (proc != null)
