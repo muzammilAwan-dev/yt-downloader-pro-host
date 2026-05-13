@@ -84,7 +84,7 @@ namespace YTDLPHost.Services
                     // THE ANTI-BOT FIX: Add Impersonation to bypass YouTube's TLS Fingerprint detection.
                     if (!command.Contains("--impersonate"))
                     {
-                        command += " --impersonate";
+                        command += " --impersonate chrome";
                     }
                 }
 
