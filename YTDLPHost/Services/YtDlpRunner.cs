@@ -66,14 +66,28 @@ namespace YTDLPHost.Services
             {
                 var saveDirectory = ExtractSaveDirectory(command);
 
-                // ENGINE ISOLATION
+                // ENGINE ISOLATION: 
+                // We use a strictly spaceless directory (YTDownloaderProEngine) to prevent 
+                // Python's internal argument parser from mangling the FFmpeg path injections.
                 string engineDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YTDownloaderProEngine");
                 string ytdlpPath = Path.Combine(engineDir, "yt-dlp.exe");
                 string ffmpegPath = Path.Combine(engineDir, "ffmpeg.exe");
 
+                // Point yt-dlp explicitly to the exact ffmpeg binary
                 if (!command.Contains("--ffmpeg-location"))
                 {
                     command += $" --ffmpeg-location \"{ffmpegPath}\"";
+                }
+
+                // THE SELF-HEALING COOKIE FIX: If the user canceled/resumed and the temp file was deleted,
+                // we MUST regenerate it dynamically from memory before executing yt-dlp!
+                if (!string.IsNullOrWhiteSpace(task.CookiePayload))
+                {
+                    if (string.IsNullOrWhiteSpace(task.CookieFilePath) || !File.Exists(task.CookieFilePath))
+                    {
+                        task.CookieFilePath = Path.Combine(Path.GetTempPath(), $"ytdlp_cookies_{Guid.NewGuid()}.txt");
+                        File.WriteAllText(task.CookieFilePath, task.CookiePayload, new UTF8Encoding(false));
+                    }
                 }
 
                 // Append local session cookies if provided by the Chrome/Brave Extension
@@ -101,6 +115,8 @@ namespace YTDLPHost.Services
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
+                    // ARCHITECTURE FIX: Redirecting Input forces Windows to detach the process from the console 
+                    // subsystem entirely, ensuring PyInstaller executables remain invisible.
                     RedirectStandardInput = true, 
                     WorkingDirectory = engineDir,
                     StandardOutputEncoding = Encoding.UTF8,
@@ -177,6 +193,10 @@ namespace YTDLPHost.Services
             }
         }
 
+        /// <summary>
+        /// Translates the raw CLI output stream from yt-dlp into bindable UI models.
+        /// Extracts file paths, tracks download percentages, and determines the current rendering phase.
+        /// </summary>
         private void HandleOutput(string? data, DownloadTask task)
         {
             if (string.IsNullOrWhiteSpace(data)) return;
@@ -185,6 +205,7 @@ namespace YTDLPHost.Services
             bool needsUiUpdate = false;
             double oldProgress = task.Progress;
 
+            // Handle playlist progression
             if (data.Contains("[download] Downloading item", StringComparison.OrdinalIgnoreCase))
             {
                 var match = PlaylistRegex.Match(data);
@@ -205,6 +226,7 @@ namespace YTDLPHost.Services
                 return; 
             }
 
+            // Track file generation across different media streams (Video vs Audio vs Subs)
             if (data.Contains("Destination:", StringComparison.OrdinalIgnoreCase) || 
                 data.Contains("Writing video", StringComparison.OrdinalIgnoreCase) || 
                 data.Contains("has already been downloaded", StringComparison.OrdinalIgnoreCase))
@@ -238,6 +260,7 @@ namespace YTDLPHost.Services
                         task.FileSize = "";
                         oldProgress = task.Progress;
 
+                        // Phase detection based on file extension
                         if (ext is ".vtt" or ".srt" or ".ass" or ".ttml" or ".lrc" or ".sbv" or ".ssa" or ".sub")
                         {
                             task.CurrentPhase = "Downloading Subtitles...";
@@ -268,6 +291,7 @@ namespace YTDLPHost.Services
                 }
             }
 
+            // Pre-download extraction phase
             if (!_extractionComplete && (data.Contains("[youtube]", StringComparison.OrdinalIgnoreCase) || data.Contains("[info]", StringComparison.OrdinalIgnoreCase)))
             {
                 if (task.CurrentPhase == "Starting...")
@@ -282,6 +306,7 @@ namespace YTDLPHost.Services
                 }
             }
 
+            // Advanced Post-Processing Identifiers
             if (data.Contains("[SponsorBlock]", StringComparison.OrdinalIgnoreCase))
             {
                 task.CurrentPhase = "Removing Sponsors...";
@@ -315,6 +340,7 @@ namespace YTDLPHost.Services
                 }
             }
 
+            // Real-time metrics
             if (data.Contains("[download]", StringComparison.OrdinalIgnoreCase) && data.Contains("%"))
             {
                 task.IsIndeterminate = false; 
@@ -399,10 +425,6 @@ namespace YTDLPHost.Services
             return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         }
 
-        /// <summary>
-        /// Commits the full execution log to the user's disk for debugging purposes.
-        /// Guaranteed to save logs even if the process aborts before resolving a file path.
-        /// </summary>
         private void SaveLogsToDisk(DownloadTask task)
         {
             string saveDir = string.Empty;
@@ -412,8 +434,6 @@ namespace YTDLPHost.Services
                 saveDir = Path.GetDirectoryName(task.OutputPath) ?? "";
             }
 
-            // THE FALLBACK LOG FIX: If a bot error or crash occurs instantly, OutputPath is empty. 
-            // We force it to dump the error log into the default Downloads directory.
             if (string.IsNullOrEmpty(saveDir))
             {
                 saveDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
@@ -431,7 +451,6 @@ namespace YTDLPHost.Services
                 if (string.IsNullOrWhiteSpace(baseFileName)) baseFileName = Path.GetFileNameWithoutExtension(task.OutputPath);
                 if (string.IsNullOrWhiteSpace(baseFileName) || baseFileName == "Unknown") baseFileName = task.Title;
                 
-                // If it crashes before fetching the title, name it after the Task ID so the log is never lost
                 if (string.IsNullOrWhiteSpace(baseFileName) || baseFileName.Contains("Fetching")) 
                 {
                     baseFileName = $"Failed_Download_{task.Id.ToString().Substring(0, 8)}";
