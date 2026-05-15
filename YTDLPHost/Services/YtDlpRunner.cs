@@ -66,21 +66,17 @@ namespace YTDLPHost.Services
             {
                 var saveDirectory = ExtractSaveDirectory(command);
 
-                // ENGINE ISOLATION: 
-                // We use a strictly spaceless directory (YTDownloaderProEngine) to prevent 
-                // Python's internal argument parser from mangling the FFmpeg path injections.
+                // ENGINE ISOLATION
                 string engineDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YTDownloaderProEngine");
                 string ytdlpPath = Path.Combine(engineDir, "yt-dlp.exe");
                 string ffmpegPath = Path.Combine(engineDir, "ffmpeg.exe");
 
-                // Point yt-dlp explicitly to the exact ffmpeg binary
                 if (!command.Contains("--ffmpeg-location"))
                 {
                     command += $" --ffmpeg-location \"{ffmpegPath}\"";
                 }
 
-                // THE SELF-HEALING COOKIE FIX: If the user canceled/resumed and the temp file was deleted,
-                // we MUST regenerate it dynamically from memory before executing yt-dlp!
+                // THE SELF-HEALING COOKIE FIX
                 if (!string.IsNullOrWhiteSpace(task.CookiePayload))
                 {
                     if (string.IsNullOrWhiteSpace(task.CookieFilePath) || !File.Exists(task.CookieFilePath))
@@ -90,15 +86,21 @@ namespace YTDLPHost.Services
                     }
                 }
 
-                // Append local session cookies if provided by the Chrome/Brave Extension
+                // Append local session cookies if provided by the Browser Extension
                 if (!string.IsNullOrEmpty(task.CookieFilePath) && File.Exists(task.CookieFilePath))
                 {
                     command += $" --cookies \"{task.CookieFilePath}\"";
 
-                    // THE ANTI-BOT FIX: Add Impersonation to bypass YouTube's TLS Fingerprint detection.
+                    // TLS IMPERSONATION: Spoofs Google Chrome's encryption fingerprint universally
                     if (!command.Contains("--impersonate"))
                     {
                         command += " --impersonate chrome";
+                    }
+
+                    // API SPOOFING: Tricks YouTube into thinking this is an iPhone app to bypass Web JS checks
+                    if (!command.Contains("--extractor-args"))
+                    {
+                        command += " --extractor-args \"youtube:player_client=ios,web\"";
                     }
                 }
 
@@ -115,15 +117,12 @@ namespace YTDLPHost.Services
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
-                    // ARCHITECTURE FIX: Redirecting Input forces Windows to detach the process from the console 
-                    // subsystem entirely, ensuring PyInstaller executables remain invisible.
                     RedirectStandardInput = true, 
                     WorkingDirectory = engineDir,
                     StandardOutputEncoding = Encoding.UTF8,
                     StandardErrorEncoding = Encoding.UTF8
                 };
 
-                // ARCHITECTURE FIX: Blind modern Windows Terminal from intercepting the execution.
                 psi.Environment.Remove("WT_SESSION");
                 psi.Environment.Remove("WT_PROFILE_ID");
 
@@ -193,10 +192,6 @@ namespace YTDLPHost.Services
             }
         }
 
-        /// <summary>
-        /// Translates the raw CLI output stream from yt-dlp into bindable UI models.
-        /// Extracts file paths, tracks download percentages, and determines the current rendering phase.
-        /// </summary>
         private void HandleOutput(string? data, DownloadTask task)
         {
             if (string.IsNullOrWhiteSpace(data)) return;
@@ -205,7 +200,6 @@ namespace YTDLPHost.Services
             bool needsUiUpdate = false;
             double oldProgress = task.Progress;
 
-            // Handle playlist progression
             if (data.Contains("[download] Downloading item", StringComparison.OrdinalIgnoreCase))
             {
                 var match = PlaylistRegex.Match(data);
@@ -226,7 +220,6 @@ namespace YTDLPHost.Services
                 return; 
             }
 
-            // Track file generation across different media streams (Video vs Audio vs Subs)
             if (data.Contains("Destination:", StringComparison.OrdinalIgnoreCase) || 
                 data.Contains("Writing video", StringComparison.OrdinalIgnoreCase) || 
                 data.Contains("has already been downloaded", StringComparison.OrdinalIgnoreCase))
@@ -260,7 +253,6 @@ namespace YTDLPHost.Services
                         task.FileSize = "";
                         oldProgress = task.Progress;
 
-                        // Phase detection based on file extension
                         if (ext is ".vtt" or ".srt" or ".ass" or ".ttml" or ".lrc" or ".sbv" or ".ssa" or ".sub")
                         {
                             task.CurrentPhase = "Downloading Subtitles...";
@@ -291,7 +283,6 @@ namespace YTDLPHost.Services
                 }
             }
 
-            // Pre-download extraction phase
             if (!_extractionComplete && (data.Contains("[youtube]", StringComparison.OrdinalIgnoreCase) || data.Contains("[info]", StringComparison.OrdinalIgnoreCase)))
             {
                 if (task.CurrentPhase == "Starting...")
@@ -306,7 +297,6 @@ namespace YTDLPHost.Services
                 }
             }
 
-            // Advanced Post-Processing Identifiers
             if (data.Contains("[SponsorBlock]", StringComparison.OrdinalIgnoreCase))
             {
                 task.CurrentPhase = "Removing Sponsors...";
@@ -340,7 +330,6 @@ namespace YTDLPHost.Services
                 }
             }
 
-            // Real-time metrics
             if (data.Contains("[download]", StringComparison.OrdinalIgnoreCase) && data.Contains("%"))
             {
                 task.IsIndeterminate = false; 
