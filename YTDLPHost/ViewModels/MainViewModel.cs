@@ -138,8 +138,9 @@ namespace YTDLPHost.ViewModels
 
                 string ytdlpPath = Path.Combine(engineDir, "yt-dlp.exe");
                 string ffmpegPath = Path.Combine(engineDir, "ffmpeg.exe");
+                string denoPath = Path.Combine(engineDir, "deno.exe"); // THE DENO JS ENGINE PATH
 
-                if (File.Exists(ytdlpPath) && File.Exists(ffmpegPath))
+                if (File.Exists(ytdlpPath) && File.Exists(ffmpegPath) && File.Exists(denoPath))
                 {
                     AppLogger.Log("[DEPENDENCIES] Core dependencies located securely.");
                     _isDependenciesReady = true;
@@ -222,6 +223,41 @@ namespace YTDLPHost.ViewModels
                     
                     File.Delete(zipPath);
                     Directory.Delete(extractPath, true);
+                }
+
+                // THE DENO JS ENGINE FIX: Download and extract the secure Deno environment
+                if (!File.Exists(denoPath))
+                {
+                    AppLogger.Log("[DEPENDENCIES] Downloading Deno JS engine for EJS puzzle bypass.");
+                    System.Windows.Application.Current?.Dispatcher.Invoke(() => 
+                    { 
+                        if (setupVm != null) { setupVm.Task.CurrentPhase = "Downloading JS engine..."; setupVm.Refresh(); }
+                    });
+
+                    string denoZipPath = Path.Combine(Path.GetTempPath(), "deno.zip");
+                    string denoExtractPath = Path.Combine(Path.GetTempPath(), "deno_ext");
+                    
+                    var denoBytes = await DownloadFileWithRetryAsync(client, "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip");
+                    await File.WriteAllBytesAsync(denoZipPath, denoBytes);
+                    
+                    AppLogger.Log("[DEPENDENCIES] Extracting Deno archive contents.");
+                    System.Windows.Application.Current?.Dispatcher.Invoke(() => 
+                    { 
+                        if (setupVm != null) { setupVm.Task.CurrentPhase = "Extracting JS engine..."; setupVm.Refresh(); }
+                    });
+
+                    if (Directory.Exists(denoExtractPath)) Directory.Delete(denoExtractPath, true);
+                    ZipFile.ExtractToDirectory(denoZipPath, denoExtractPath);
+                    
+                    string extractedDeno = Path.Combine(denoExtractPath, "deno.exe");
+                    if (File.Exists(extractedDeno))
+                    {
+                        File.Copy(extractedDeno, denoPath, true);
+                        try { File.Delete(denoPath + ":Zone.Identifier"); } catch { }
+                    }
+                    
+                    File.Delete(denoZipPath);
+                    Directory.Delete(denoExtractPath, true);
                 }
 
                 AppLogger.Log("[DEPENDENCIES] Dependency installation complete. Files safely unblocked.");
