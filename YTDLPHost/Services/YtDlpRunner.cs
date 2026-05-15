@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -20,9 +21,14 @@ namespace YTDLPHost.Services
         // --- Output Parsing Expressions ---
         private static readonly Regex CmdTrimRegex = new(@"^(?:yt-dlp\.exe|yt-dlp)\s+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex PercentRegex = new(@"\[download\]\s+(?:(\d+\.?\d*)%|100%)", RegexOptions.Compiled);
-        private static readonly Regex SpeedRegex = new(@"at\s+([\d\.]+[KMG]iB/s)", RegexOptions.Compiled);
-        private static readonly Regex EtaRegex = new(@"ETA\s+([\d:]+)", RegexOptions.Compiled);
-        private static readonly Regex SizeRegex = new(@"of\s+([\d\.]+[KMG]iB)", RegexOptions.Compiled);
+        
+        // BUG FIX: Updated to handle direct B/s and Unknown ETAs from Adaptive Streams
+        private static readonly Regex SpeedRegex = new(@"at\s+([\d\.]+(?:[KMG]iB|B)/s)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        private static readonly Regex EtaRegex = new(@"ETA\s+([\d:]+|Unknown)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        
+        // BUG FIX: Added \s* to elegantly capture spaced adaptive stream sizes (~   421.00KiB)
+        private static readonly Regex SizeRegex = new(@"of\s+(~?\s*[\d\.]+\s*(?:[KMG]iB|B))", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        
         private static readonly Regex PlaylistRegex = new(@"Downloading item (\d+) of (\d+)", RegexOptions.Compiled);
         private static readonly Regex OutputTemplateRegex = new(@"-o\s+""([^""]+)""", RegexOptions.Compiled);
         private static readonly Regex PathTemplateRegex = new(@"-P\s+""([^""]+)""", RegexOptions.Compiled);
@@ -32,6 +38,9 @@ namespace YTDLPHost.Services
         private Process? _process;
         private readonly CancellationTokenSource _cts = new();
         private readonly StringBuilder _errorBuffer = new();
+        
+        // BUG FIX: State memory to perfectly track resumed files without scrambling the UI
+        private readonly Dictionary<string, string> _filePhases = new(StringComparer.OrdinalIgnoreCase);
         
         private bool _extractionComplete;
         private bool _disposed;
@@ -46,12 +55,10 @@ namespace YTDLPHost.Services
 
         public bool IsRunning => _process != null && !_process.HasExited;
 
-        /// <summary>
-        /// Initiates the download task in a heavily isolated background process.
-        /// </summary>
         public async Task ExecuteAsync(DownloadTask task)
         {
             _errorBuffer.Clear();
+            _filePhases.Clear();
             _extractionComplete = false;
             _hasStartedVideoMedia = false; 
             
@@ -77,7 +84,7 @@ namespace YTDLPHost.Services
                     command += $" --ffmpeg-location \"{ffmpegPath}\"";
                 }
 
-                // THE EJS PUZZLE FIX: Wire up the secure Deno JS Engine
+                // THE EJS PUZZLE FIX
                 if (File.Exists(denoPath) && !command.Contains("--js-runtimes"))
                 {
                     command += $" --js-runtimes \"deno:{denoPath}\"";
@@ -101,7 +108,7 @@ namespace YTDLPHost.Services
                         command += $" --cookies \"{task.CookieFilePath}\"";
                     }
 
-                    // THE SAFARI BYPASS: Lenient cookie acceptance + JS engine solving = flawless format extraction
+                    // THE SAFARI BYPASS
                     if (!command.Contains("--extractor-args"))
                     {
                         command += " --extractor-args \"youtube:player_client=web_safari,mweb\"";
@@ -213,6 +220,7 @@ namespace YTDLPHost.Services
                     
                     _extractionComplete = false; 
                     _hasStartedVideoMedia = false; 
+                    _filePhases.Clear(); 
                     task.Progress = 0.0;
                     task.CurrentPhase = "Starting...";
                     task.FileSize = "";
@@ -238,7 +246,14 @@ namespace YTDLPHost.Services
                     
                     if (!string.IsNullOrWhiteSpace(path))
                     {
-                        task.TrackedFiles.Add(path);
+                        // THE RESUME BUG FIX: Track files to avoid scrambling phase text on network blips
+                        bool isNewFile = !task.TrackedFiles.Contains(path);
+                        if (isNewFile) 
+                        {
+                            task.TrackedFiles.Add(path);
+                            task.FileSize = ""; 
+                        }
+                        
                         task.OutputPath = path;
                         
                         string cleanTitle = Path.GetFileNameWithoutExtension(path) ?? "Unknown";
@@ -253,33 +268,43 @@ namespace YTDLPHost.Services
                             OnInfoExtracted?.Invoke(this, new ExtractedInfoEventArgs(task.Id, task.Title, task.OutputPath));
                         }
 
-                        task.Progress = alreadyDownloadedMatch.Success ? 100.0 : 0.0;
-                        task.FileSize = "";
-                        oldProgress = task.Progress;
+                        if (alreadyDownloadedMatch.Success) 
+                        {
+                            task.Progress = 100.0;
+                            oldProgress = task.Progress;
+                        }
 
-                        if (ext is ".vtt" or ".srt" or ".ass" or ".ttml" or ".lrc" or ".sbv" or ".ssa" or ".sub")
+                        if (isNewFile)
                         {
-                            task.CurrentPhase = "Downloading Subtitles...";
-                        }
-                        else if (ext is ".webp" or ".jpg" or ".jpeg" or ".png" or ".gif" or ".bmp" or ".tiff")
-                        {
-                            task.CurrentPhase = "Downloading Thumbnail...";
-                        }
-                        else if (ext is ".m4a" or ".mp3" or ".ogg" or ".wav" or ".aac" or ".flac" or ".opus" or ".wma" || task.Resolution == "Audio")
-                        {
-                            task.CurrentPhase = "Downloading Audio...";
-                        }
-                        else
-                        {
-                            if (!_hasStartedVideoMedia) 
+                            if (ext is ".vtt" or ".srt" or ".ass" or ".ttml" or ".lrc" or ".sbv" or ".ssa" or ".sub")
                             {
-                                task.CurrentPhase = "Downloading Video...";
-                                _hasStartedVideoMedia = true; 
+                                _filePhases[path] = "Downloading Subtitles...";
                             }
-                            else 
+                            else if (ext is ".webp" or ".jpg" or ".jpeg" or ".png" or ".gif" or ".bmp" or ".tiff")
                             {
-                                task.CurrentPhase = "Downloading Audio...";
+                                _filePhases[path] = "Downloading Thumbnail...";
                             }
+                            else if (ext is ".m4a" or ".mp3" or ".ogg" or ".wav" or ".aac" or ".flac" or ".opus" or ".wma" || task.Resolution == "Audio")
+                            {
+                                _filePhases[path] = "Downloading Audio...";
+                            }
+                            else
+                            {
+                                if (!_hasStartedVideoMedia) 
+                                {
+                                    _filePhases[path] = "Downloading Video...";
+                                    _hasStartedVideoMedia = true; 
+                                }
+                                else 
+                                {
+                                    _filePhases[path] = "Downloading Audio...";
+                                }
+                            }
+                        }
+                        
+                        if (_filePhases.TryGetValue(path, out var phase))
+                        {
+                            task.CurrentPhase = phase;
                         }
                         
                         needsUiUpdate = true;
@@ -344,11 +369,17 @@ namespace YTDLPHost.Services
                     needsUiUpdate = true;
                 }
 
+                // THE SIZE BUG FIX: We aggressively replace spaces so '~   421MiB' becomes '~421MiB'. 
+                // We also removed the lock, so this size updates dynamically in real-time as HLS chunks download.
                 var sizeMatch = SizeRegex.Match(data);
-                if (sizeMatch.Success && string.IsNullOrEmpty(task.FileSize)) 
+                if (sizeMatch.Success) 
                 { 
-                    task.FileSize = sizeMatch.Groups[1].Value; 
-                    needsUiUpdate = true; 
+                    string parsedSize = sizeMatch.Groups[1].Value.Replace(" ", "");
+                    if (task.FileSize != parsedSize)
+                    {
+                        task.FileSize = parsedSize; 
+                        needsUiUpdate = true; 
+                    }
                 }
 
                 var percentMatch = PercentRegex.Match(data);
