@@ -94,10 +94,10 @@ namespace YTDLPHost.Services
                         command += $" --cookies \"{task.CookieFilePath}\"";
                     }
 
-                    // THE UNIVERSAL BYPASS: TV Client seamlessly handles VEVO/Music Videos AND bypasses strict Web Bot checks
+                    // THE UNIVERSAL BYPASS: Android Client natively avoids VEVO DRM and bypasses strict Web Bot checks
                     if (!command.Contains("--extractor-args"))
                     {
-                        command += " --extractor-args \"youtube:player_client=tv,web\"";
+                        command += " --extractor-args \"youtube:player_client=android,web\"";
                     }
                 }
 
