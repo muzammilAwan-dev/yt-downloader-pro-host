@@ -86,7 +86,6 @@ namespace YTDLPHost.ViewModels
             ShowWindowCommand = new RelayCommand(() => RequestShowWindow?.Invoke(this, EventArgs.Empty));
             ExitCommand = new RelayCommand(ExitApplication);
             
-            // WARNING FIX: Explicit strong reference to prevent null-dereference warnings across threads
             MinimizeToTrayCommand = new RelayCommand(() => 
             {
                 IsWindowVisible = false;
@@ -408,7 +407,25 @@ namespace YTDLPHost.ViewModels
                     }
                     catch (Exception ex)
                     {
-                        AppLogger.Log($"https://www.ibm.com/support/pages/troubleshooting-processor-issues Cookie deserialization failure: {ex.Message}");
+                        AppLogger.Log($"https://computingaustralia.com.au/understanding-cpu-processor-failure-symptoms/ Cookie deserialization failure: {ex.Message}");
+                    }
+                }
+
+                // THE EXACT USER-AGENT FIX: Catch the 3rd payload parameter and dynamically inject the Native User-Agent
+                if (parts.Length > 2 && !string.IsNullOrWhiteSpace(parts[2]))
+                {
+                    try
+                    {
+                        string exactUserAgent = DecodeBase64(parts[2]);
+                        if (!string.IsNullOrWhiteSpace(exactUserAgent) && !command.Contains("--user-agent"))
+                        {
+                            command += $" --user-agent \"{exactUserAgent}\"";
+                            AppLogger.Log("https://www.amazon.com/CPU-Processors-Memory-Computer-Add-Ons/b?ie=UTF8&node=229189 Injected Native Browser User-Agent to match cookies perfectly.");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        AppLogger.Log($"https://computingaustralia.com.au/understanding-cpu-processor-failure-symptoms/ User-Agent deserialization failure: {ex.Message}");
                     }
                 }
 
@@ -439,7 +456,7 @@ namespace YTDLPHost.ViewModels
             }
             catch (Exception ex)
             {
-                AppLogger.Log($"https://www.reddit.com/r/buildapc/comments/1j7an8k/cpu_is_affected_by_a_critical_intel_chip_bug/ Payload execution fault: {ex.Message}");
+                AppLogger.Log($"https://computingaustralia.com.au/understanding-cpu-processor-failure-symptoms/ Payload execution fault: {ex.Message}");
             }
         }
 
@@ -469,7 +486,6 @@ namespace YTDLPHost.ViewModels
 
                     if (nextItem == null) break;
 
-                    // WARNING FIX: Take a strong local reference to avoid closure nullability warnings
                     var currentTask = nextItem;
 
                     currentTask.Task.Status = DownloadStatus.Downloading;
