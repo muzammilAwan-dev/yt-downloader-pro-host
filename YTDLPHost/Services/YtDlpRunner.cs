@@ -89,18 +89,15 @@ namespace YTDLPHost.Services
                 // Append local session cookies if provided by the Browser Extension
                 if (!string.IsNullOrEmpty(task.CookieFilePath) && File.Exists(task.CookieFilePath))
                 {
-                    command += $" --cookies \"{task.CookieFilePath}\"";
-
-                    // TLS IMPERSONATION: Spoofs Google Chrome's encryption fingerprint universally
-                    if (!command.Contains("--impersonate"))
+                    if (!command.Contains("--cookies"))
                     {
-                        command += " --impersonate chrome";
+                        command += $" --cookies \"{task.CookieFilePath}\"";
                     }
 
-                    // API SPOOFING: Tricks YouTube into thinking this is an iPhone app to bypass Web JS checks
+                    // THE UNIVERSAL BYPASS: TV Client seamlessly handles VEVO/Music Videos AND bypasses strict Web Bot checks
                     if (!command.Contains("--extractor-args"))
                     {
-                        command += " --extractor-args \"youtube:player_client=ios,web\"";
+                        command += " --extractor-args \"youtube:player_client=tv,web\"";
                     }
                 }
 
