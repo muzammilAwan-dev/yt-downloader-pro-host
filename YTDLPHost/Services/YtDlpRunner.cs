@@ -70,10 +70,17 @@ namespace YTDLPHost.Services
                 string engineDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YTDownloaderProEngine");
                 string ytdlpPath = Path.Combine(engineDir, "yt-dlp.exe");
                 string ffmpegPath = Path.Combine(engineDir, "ffmpeg.exe");
+                string denoPath = Path.Combine(engineDir, "deno.exe");
 
                 if (!command.Contains("--ffmpeg-location"))
                 {
                     command += $" --ffmpeg-location \"{ffmpegPath}\"";
+                }
+
+                // THE EJS PUZZLE FIX: Wire up the secure Deno JS Engine
+                if (File.Exists(denoPath) && !command.Contains("--js-runtimes"))
+                {
+                    command += $" --js-runtimes \"deno:{denoPath}\"";
                 }
 
                 // THE SELF-HEALING COOKIE FIX
@@ -94,10 +101,10 @@ namespace YTDLPHost.Services
                         command += $" --cookies \"{task.CookieFilePath}\"";
                     }
 
-                    // THE UNIVERSAL BYPASS: Android Client natively avoids VEVO DRM and bypasses strict Web Bot checks
+                    // THE SAFARI BYPASS: Lenient cookie acceptance + JS engine solving = flawless format extraction
                     if (!command.Contains("--extractor-args"))
                     {
-                        command += " --extractor-args \"youtube:player_client=android,web\"";
+                        command += " --extractor-args \"youtube:player_client=web_safari,mweb\"";
                     }
                 }
 
